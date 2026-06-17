@@ -14,6 +14,9 @@ import type {ArchiveCaption, ArchiveData, ArchiveScene} from './types';
 
 export const ArchiveDocumentary = ({data}: {data: ArchiveData}) => {
   const {fps} = useVideoConfig();
+  const hookEnd = data.scenes
+    .filter((scene) => scene.hook)
+    .reduce((latest, scene) => Math.max(latest, scene.end), 0);
 
   if (!data.scenes.length) {
     return (
@@ -27,6 +30,9 @@ export const ArchiveDocumentary = ({data}: {data: ArchiveData}) => {
   return (
     <AbsoluteFill style={styles.stage}>
       {data.audio ? <Audio src={staticFile(data.audio)} /> : null}
+      {data.backgroundAudio ? (
+        <Audio src={resolveAudioSrc(data.backgroundAudio)} volume={data.backgroundVolume ?? 0.065} loop />
+      ) : null}
       <SoundEffects data={data} />
       {data.scenes.map((scene) => {
         const from = Math.floor(scene.start * fps);
@@ -37,7 +43,7 @@ export const ArchiveDocumentary = ({data}: {data: ArchiveData}) => {
           </Sequence>
         );
       })}
-      <Captions captions={data.captions ?? []} />
+      {data.subtitlesEnabled === false ? null : <Captions captions={data.captions ?? []} startAt={hookEnd} />}
     </AbsoluteFill>
   );
 };
@@ -68,9 +74,10 @@ const SoundEffects = ({data}: {data: ArchiveData}) => {
       {data.scenes.slice(1).map((scene) => {
         const file = accentSound(scene.accent, scene.sfx);
         if (!file) return null;
+        const volume = scene.hook ? 0.16 : 0.075;
         return (
           <Sequence key={`sfx-${scene.index}`} from={Math.floor(scene.start * fps)} durationInFrames={Math.round(fps * 1.1)}>
-            <Audio src={resolveAudioSrc(file)} volume={0.075} />
+            <Audio src={resolveAudioSrc(file)} volume={volume} />
           </Sequence>
         );
       })}
@@ -108,6 +115,10 @@ const ArchiveSceneFrame = ({
     ? interpolate(frame, [0, 14, 42], [8, 2.5, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})
     : 0;
 
+  if (scene.hook) {
+    return <HookSceneFrame scene={scene} durationInFrames={durationInFrames} />;
+  }
+
   return (
     <AbsoluteFill style={{...styles.scene, opacity: fade}}>
       <AbsoluteFill
@@ -135,11 +146,71 @@ const ArchiveSceneFrame = ({
   );
 };
 
+const HookSceneFrame = ({
+  scene,
+  durationInFrames,
+}: {
+  scene: ArchiveScene;
+  durationInFrames: number;
+}) => {
+  const frame = useCurrentFrame();
+  const {fps} = useVideoConfig();
+  const progress = interpolate(frame, [0, Math.max(1, durationInFrames - 1)], [0, 1], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
+  const fade = Math.min(
+    interpolate(frame, [0, 9], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'}),
+    interpolate(frame, [durationInFrames - 10, durationInFrames], [1, 0], {
+      extrapolateLeft: 'clamp',
+      extrapolateRight: 'clamp',
+    }),
+  );
+  const enter = spring({frame, fps, config: {damping: 18, stiffness: 130, mass: 0.7}});
+  const photoScale = interpolate(enter, [0, 1], [0.94, 1]) + progress * 0.018;
+  const jitter = Math.sin(frame * 0.53 + scene.index) * 0.45;
+  const seconds = Math.max(0, Math.floor((Math.floor(scene.start * fps) + frame) / fps));
+  const timer = `00:${String(seconds).padStart(2, '0')}`;
+
+  return (
+    <AbsoluteFill style={styles.hookStage}>
+      <AbsoluteFill style={styles.hookEdgeFade} />
+      <div style={styles.hookCameraFrame}>
+        <div style={styles.hookHud}>
+          <span style={styles.hookPlay}>PLAY</span>
+          <span style={styles.hookTimer}>{timer}</span>
+        </div>
+        <div
+          style={{
+            ...styles.hookPhotoMat,
+            opacity: fade,
+            transform: `translate(-50%, -50%) translate(${jitter}px, ${-jitter * 0.5}px) scale(${photoScale})`,
+          }}
+        >
+          <div style={styles.hookPhotoInner}>
+            <Img
+              src={staticFile(scene.image)}
+              style={{
+                ...styles.hookPhoto,
+                filter: `${imageFilter(scene, frame)} contrast(1.14) brightness(0.94)`,
+              }}
+            />
+          </div>
+        </div>
+        <div style={styles.hookScanlines} />
+        <div style={{...styles.hookFlicker, opacity: 0.1 + Math.abs(Math.sin(frame * 0.31)) * 0.08}} />
+      </div>
+      <FilmDamage frame={frame} scene={scene} />
+      <MomentAccent scene={{...scene, accent: 'shutter'}} frame={frame} durationInFrames={durationInFrames} />
+    </AbsoluteFill>
+  );
+};
+
 const imageTransform = (scene: ArchiveScene, progress: number, frame: number) => {
-  const pulse = Math.sin(frame * 0.03 + scene.index) * 0.002;
-  const zoom = scene.motion === 'pull' ? 1.115 - progress * 0.048 : 1.068 + progress * 0.048;
-  const pan = 34 * (progress - 0.5);
-  const drift = Math.sin(progress * Math.PI * 2 + scene.index) * 8;
+  const pulse = Math.sin(frame * 0.03 + scene.index) * 0.001;
+  const zoom = scene.motion === 'pull' ? 1.025 - progress * 0.018 : 1.006 + progress * 0.019;
+  const pan = 12 * (progress - 0.5);
+  const drift = Math.sin(progress * Math.PI * 2 + scene.index) * 3;
 
   if (scene.motion === 'pan_left') {
     return `scale(${zoom + pulse}) translateX(${pan}px) translateY(${drift}px)`;
@@ -148,12 +219,12 @@ const imageTransform = (scene: ArchiveScene, progress: number, frame: number) =>
     return `scale(${zoom + pulse}) translateX(${-pan}px) translateY(${drift}px)`;
   }
   if (scene.motion === 'scanner') {
-    return `scale(${1.07 + pulse}) translateX(${Math.sin(frame * 0.012) * 15}px) translateY(${progress * -18}px)`;
+    return `scale(${1.018 + pulse}) translateX(${Math.sin(frame * 0.012) * 5}px) translateY(${progress * -6}px)`;
   }
   if (scene.motion === 'drift') {
-    return `scale(${1.06 + pulse}) translateX(${Math.sin(frame * 0.018) * 18}px) translateY(${Math.cos(frame * 0.014) * 13}px)`;
+    return `scale(${1.014 + pulse}) translateX(${Math.sin(frame * 0.018) * 6}px) translateY(${Math.cos(frame * 0.014) * 4}px)`;
   }
-  return `scale(${zoom + pulse}) translateY(${scene.motion === 'slow_push' ? -progress * 20 : drift}px)`;
+  return `scale(${zoom + pulse}) translateY(${scene.motion === 'slow_push' ? -progress * 6 : drift}px)`;
 };
 
 const imageFilter = (scene: ArchiveScene, frame: number) => {
@@ -274,11 +345,14 @@ const MomentAccent = ({
   return null;
 };
 
-const Captions = ({captions}: {captions: ArchiveCaption[]}) => {
+const Captions = ({captions, startAt}: {captions: ArchiveCaption[]; startAt: number}) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
   const second = frame / fps;
-  const caption = captions.find((item) => second >= item.start && second < item.end);
+  if (second < startAt) {
+    return null;
+  }
+  const caption = captions.find((item) => item.start >= startAt && second >= item.start && second < item.end);
   if (!caption) {
     return null;
   }
@@ -327,15 +401,16 @@ const styles: Record<string, CSSProperties> = {
     overflow: 'hidden',
   },
   imageWrap: {
-    top: -160,
-    left: -92,
-    width: 'calc(100% + 184px)',
-    height: 'calc(100% + 340px)',
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
   image: {
     width: '100%',
     height: '100%',
-    objectFit: 'cover',
+    objectFit: 'contain',
     transformOrigin: 'center center',
   },
   softGrade: {
@@ -448,6 +523,107 @@ const styles: Record<string, CSSProperties> = {
     height: 10,
     marginRight: 14,
     backgroundColor: '#8f2a1e',
+  },
+  hookStage: {
+    background:
+      'radial-gradient(circle at 50% 45%, rgba(230,222,205,0.15), rgba(0,0,0,0.18) 42%, rgba(0,0,0,0.92) 100%), #040503',
+    overflow: 'hidden',
+  },
+  hookCameraFrame: {
+    position: 'absolute',
+    inset: 34,
+    borderRadius: 24,
+    border: '3px solid rgba(31,151,83,0.55)',
+    boxShadow:
+      'inset 0 0 120px rgba(0,0,0,0.85), inset 0 0 18px rgba(43,173,95,0.28), 0 0 26px rgba(35,142,82,0.2)',
+    backgroundColor: 'rgba(238,231,212,0.09)',
+    overflow: 'hidden',
+  },
+  hookEdgeFade: {
+    background:
+      'radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 32%, rgba(0,0,0,0.24) 58%, rgba(0,0,0,0.82) 100%)',
+  },
+  hookHud: {
+    position: 'absolute',
+    top: 46,
+    left: 54,
+    right: 54,
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    zIndex: 8,
+    fontFamily: 'Menlo, Monaco, monospace',
+    fontWeight: 800,
+    letterSpacing: 1.2,
+  },
+  hookPlay: {
+    color: '#239a57',
+    fontSize: 24,
+    textShadow: '0 0 9px rgba(38,180,102,0.55)',
+  },
+  hookTimer: {
+    color: '#c5272e',
+    fontSize: 24,
+    textShadow: '0 0 8px rgba(226,45,52,0.42)',
+  },
+  hookPhotoMat: {
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+    width: 760,
+    height: 855,
+    padding: 18,
+    backgroundColor: 'rgba(235,229,211,0.93)',
+    boxShadow: '0 26px 90px rgba(0,0,0,0.6), 0 0 0 1px rgba(251,246,229,0.42)',
+    transformOrigin: 'center center',
+  },
+  hookPhotoInner: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#e9dfc9',
+    overflow: 'hidden',
+  },
+  hookPhoto: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain',
+    backgroundColor: '#e9dfc9',
+  },
+  hookBottomPlayer: {
+    position: 'absolute',
+    left: 88,
+    right: 88,
+    bottom: 58,
+    zIndex: 9,
+  },
+  hookPlayerTrack: {
+    width: '100%',
+    height: 7,
+    backgroundColor: 'rgba(230,238,222,0.14)',
+    borderRadius: 7,
+    boxShadow: '0 0 12px rgba(0,0,0,0.55)',
+    overflow: 'hidden',
+  },
+  hookPlayerProgress: {
+    height: '100%',
+    background: 'linear-gradient(90deg, rgba(35,154,87,0.92), rgba(68,190,112,0.96))',
+    boxShadow: '0 0 10px rgba(44,174,95,0.46)',
+  },
+  hookScanlines: {
+    position: 'absolute',
+    inset: 0,
+    backgroundImage:
+      'repeating-linear-gradient(180deg, rgba(255,255,255,0.035) 0px, rgba(255,255,255,0.035) 1px, rgba(0,0,0,0) 3px, rgba(0,0,0,0) 7px)',
+    mixBlendMode: 'screen',
+    opacity: 0.28,
+    pointerEvents: 'none',
+  },
+  hookFlicker: {
+    position: 'absolute',
+    inset: 0,
+    backgroundColor: '#d9cfb8',
+    mixBlendMode: 'soft-light',
+    pointerEvents: 'none',
   },
   captionLayer: {
     justifyContent: 'flex-end',

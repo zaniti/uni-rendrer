@@ -20,6 +20,7 @@ export type ArchiveScene = {
   motion: string;
   accent?: string;
   sfx?: string;
+  hook?: boolean;
 };
 
 export type ArchiveCaption = {
@@ -33,6 +34,10 @@ export type ArchiveData = {
   fps: number;
   duration: number;
   audio: string;
+  subtitlesEnabled?: boolean;
+  backgroundAudio?: string;
+  backgroundVolume?: number;
+  hookSceneCount?: number;
   captions?: ArchiveCaption[];
   sfx?: {
     projectorStart?: string;
