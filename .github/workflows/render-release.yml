@@ -226,10 +226,14 @@ jobs:
       - name: Checkout renderer
         uses: actions/checkout@v4
 
-      - name: Install FFmpeg
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install renderer dependencies
+        run: npm ci
 
       - name: Download rendered chunks
         uses: actions/download-artifact@v4
@@ -258,8 +262,8 @@ jobs:
           for file in files:
               print('  ' + str(file))
           PY
-          ffmpeg -y -f concat -safe 0 -i chunk-list.txt -c copy "out/${{ matrix.stem }}.mp4" || \
-          ffmpeg -y -f concat -safe 0 -i chunk-list.txt -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p -c:a aac -b:a 192k "out/${{ matrix.stem }}.mp4"
+          npx remotion ffmpeg -y -f concat -safe 0 -i chunk-list.txt -c copy "out/${{ matrix.stem }}.mp4" || \
+          npx remotion ffmpeg -y -f concat -safe 0 -i chunk-list.txt -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p -c:a aac -b:a 192k "out/${{ matrix.stem }}.mp4"
         env:
           EXPECTED_CHUNKS: ${{ matrix.chunk_count }}
 
