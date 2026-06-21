@@ -13,5 +13,10 @@
     "marker": "archive.json",
     "composition": "ArchiveDocumentary",
     "description": "Archive documentary packages from Archive Remotion Factory"
+  },
+  "cartoon-explainer": {
+    "marker": "cartoon.json",
+    "composition": "CartoonExplainer",
+    "description": "Cartoon explainer packages from Cartoon Factory"
   }
 }

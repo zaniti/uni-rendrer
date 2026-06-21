@@ -7,3 +7,107 @@ body {
   margin: 0;
   background: #050505;
 }
+
+.stage {
+  background: #f6f3ea;
+  color: #151515;
+  overflow: hidden;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.paperTexture {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.12;
+  background-image:
+    radial-gradient(circle at 20% 30%, rgba(0, 0, 0, 0.05) 0 1px, transparent 1px),
+    radial-gradient(circle at 70% 65%, rgba(0, 0, 0, 0.04) 0 1px, transparent 1px);
+  background-size: 11px 11px, 17px 17px;
+  mix-blend-mode: multiply;
+}
+
+.kineticSubtitle {
+  position: absolute;
+  left: 50%;
+  bottom: 30px;
+  transform: translateX(-50%);
+  transform-origin: center bottom;
+  z-index: 20;
+  width: 1280px;
+  max-width: calc(100% - 120px);
+  font-family: Arial Black, Arial, Helvetica, sans-serif;
+  line-height: 0.96;
+  font-weight: 950;
+  text-align: center;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.kineticSubtitleLead {
+  color: #fff;
+  font-size: 46px;
+  letter-spacing: 0.2px;
+  -webkit-text-stroke: 5px #111;
+  paint-order: stroke fill;
+  text-shadow: 0 4px 0 rgba(0, 0, 0, 0.22);
+}
+
+.kineticSubtitleEmphasis {
+  color: #ffd326;
+  font-size: 68px;
+  letter-spacing: 0.6px;
+  -webkit-text-stroke: 6px #111;
+  paint-order: stroke fill;
+  text-shadow: 0 5px 0 rgba(0, 0, 0, 0.22);
+}
+
+.titleScene {
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  background: #f6f3ea;
+}
+
+.titleText {
+  max-width: 1180px;
+  text-align: center;
+  font-weight: 950;
+  line-height: 1.02;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.titleRule {
+  width: 480px;
+  height: 18px;
+  background: #ffd53a;
+  border: 4px solid #141414;
+}
+
+.channelBug {
+  position: absolute;
+  top: 34px;
+  left: 42px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 2px solid rgba(20, 20, 20, 0.55);
+  color: #111;
+  font-size: 24px;
+  font-weight: 900;
+  text-transform: none;
+  letter-spacing: 0;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.1);
+}
+
+.channelDot {
+  width: 14px;
+  height: 14px;
+  background: #ffd53a;
+  border: 3px solid #141414;
+  display: inline-block;
+}

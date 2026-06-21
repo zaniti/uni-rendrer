@@ -3,9 +3,11 @@ import {useCallback, useEffect, useState} from 'react';
 import {AvatarRetention} from './AvatarRetention';
 import {MainComposition} from './news/MainComposition';
 import {ArchiveDocumentary} from './archive/ArchiveDocumentary';
+import {CartoonExplainer} from './cartoon/CartoonExplainer';
 import type {AvatarPlan} from './types';
 import type {ScenesData} from './news/types';
 import type {ArchiveData} from './archive/types';
+import type {CartoonData} from './cartoon/types';
 
 const fallbackAvatar: AvatarPlan = {
   title: 'Avatar Tax',
@@ -54,6 +56,27 @@ const fallbackArchive: ArchiveData = {
   scenes: [],
 };
 
+const fallbackCartoon: CartoonData = {
+  kind: 'CartoonExplainer',
+  stem: 'cartoon-preview',
+  audio: '',
+  fps: 30,
+  width: 1920,
+  height: 1080,
+  duration_seconds: 8,
+  scenes: [
+    {
+      id: 1,
+      text: 'Build a cartoon story package first.',
+      headline: 'Cartoon Explainer',
+      prompt: '',
+      approved: false,
+      start: 0,
+      end: 8,
+    },
+  ],
+};
+
 async function readJsonOrFallback<T>(file: string, fallback: T): Promise<T> {
   try {
     const response = await fetch(staticFile(file));
@@ -71,18 +94,21 @@ export const Root = () => {
   const [avatar, setAvatar] = useState<AvatarPlan | null>(null);
   const [news, setNews] = useState<ScenesData | null>(null);
   const [archive, setArchive] = useState<ArchiveData | null>(null);
+  const [cartoon, setCartoon] = useState<CartoonData | null>(null);
   const [handle] = useState(() => delayRender('Loading render package data'));
 
   const load = useCallback(async () => {
     try {
-      const [avatarData, newsData, archiveData] = await Promise.all([
+      const [avatarData, newsData, archiveData, cartoonData] = await Promise.all([
         readJsonOrFallback('avatar_plan.json', fallbackAvatar),
         readJsonOrFallback('scenes.json', fallbackNews),
         readJsonOrFallback('archive.json', fallbackArchive),
+        readJsonOrFallback('cartoon.json', fallbackCartoon),
       ]);
       setAvatar(avatarData);
       setNews(newsData);
       setArchive(archiveData);
+      setCartoon(cartoonData);
     } finally {
       continueRender(handle);
     }
@@ -95,9 +121,13 @@ export const Root = () => {
   const avatarData = avatar ?? fallbackAvatar;
   const newsData = news ?? fallbackNews;
   const archiveData = archive ?? fallbackArchive;
+  const cartoonData = cartoon ?? fallbackCartoon;
   const avatarFps = avatarData.fps || 30;
   const newsFps = newsData.fps || 30;
   const archiveFps = archiveData.fps || 30;
+  const cartoonFps = cartoonData.fps || 30;
+  const cartoonSceneEnd = cartoonData.scenes.reduce((latest, scene) => Math.max(latest, scene.end || 0), 0);
+  const cartoonDuration = cartoonData.duration_seconds || cartoonSceneEnd || 8;
 
   return (
     <>
@@ -127,6 +157,15 @@ export const Root = () => {
         width={1920}
         height={1080}
         defaultProps={{data: archiveData}}
+      />
+      <Composition
+        id="CartoonExplainer"
+        component={CartoonExplainer}
+        durationInFrames={Math.max(30, Math.ceil(cartoonDuration * cartoonFps))}
+        fps={cartoonFps}
+        width={cartoonData.width || 1920}
+        height={cartoonData.height || 1080}
+        defaultProps={{data: cartoonData}}
       />
     </>
   );

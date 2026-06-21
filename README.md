@@ -7,6 +7,7 @@ Current wired renderers:
 - `avatar-tax`: detects zips containing `avatar_plan.json` and renders the `AvatarTax` composition.
 - `flash-news`: detects zips containing `scenes.json` and renders the `NewsFlash` composition.
 - `archive-documentary`: detects zips containing `archive.json` and renders the `ArchiveDocumentary` composition.
+- `cartoon-explainer`: detects zips containing `cartoon.json` and renders the `CartoonExplainer` composition.
 
 Workflow inputs:
 

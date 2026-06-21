@@ -162,7 +162,7 @@ jobs:
           data = json.loads(marker_path.read_text(encoding='utf-8'))
           fps = positive_int(data.get('fps'), 30)
           try:
-              duration_seconds = float(data.get('duration') or 0)
+              duration_seconds = float(data.get('duration') or data.get('duration_seconds') or 0)
           except Exception:
               duration_seconds = 0
           if duration_seconds <= 0:
