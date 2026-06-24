@@ -4,13 +4,25 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Release tag that contains one or more zip assets, for example v1"
+        description: "Release tag that contains one or more zip assets"
         required: true
+        type: choice
+        options:
+          - "v1"
+          - "v2"
+          - "v3"
+          - "v4"
+          - "v5"
+          - "v6"
+          - "v7"
+          - "v8"
+          - "v9"
+          - "v10"
         default: "v1"
       chunk_workers:
         description: "Parallel chunk workers per video"
         required: true
-        default: "4"
+        default: "20"
       render_scale:
         description: "Render scale: 1 = 1080p, 2 = 4K"
         required: true
@@ -18,7 +30,7 @@ on:
         options:
           - "1"
           - "2"
-        default: "2"
+        default: "1"
 
 permissions:
   contents: write
