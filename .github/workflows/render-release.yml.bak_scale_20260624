@@ -11,13 +11,13 @@ on:
         description: "Parallel chunk workers per video"
         required: true
         default: "4"
-      render_scale:
-        description: "Render scale: 1 = 1080p, 2 = 4K"
+      videos_parallel:
+        description: "How many videos to process at the same time"
         required: true
-        type: choice
-        options:
-          - "1"
-          - "2"
+        default: "5"
+      remotion_concurrency:
+        description: "Remotion concurrency inside each chunk worker"
+        required: true
         default: "2"
 
 permissions:
@@ -30,6 +30,7 @@ jobs:
     outputs:
       chunk_matrix: ${{ steps.matrix.outputs.chunk_matrix }}
       video_matrix: ${{ steps.matrix.outputs.video_matrix }}
+      chunk_max_parallel: ${{ steps.matrix.outputs.chunk_max_parallel }}
     steps:
       - name: Checkout renderer
         uses: actions/checkout@v4
@@ -47,6 +48,7 @@ jobs:
         id: matrix
         env:
           CHUNK_WORKERS: ${{ inputs.chunk_workers }}
+          VIDEOS_PARALLEL: ${{ inputs.videos_parallel }}
         run: |
           python3 - <<'PY'
           import json
@@ -62,6 +64,7 @@ jobs:
                   return default
 
           chunk_workers = positive_int(os.environ.get('CHUNK_WORKERS'), 4)
+          videos_parallel = positive_int(os.environ.get('VIDEOS_PARALLEL'), 5)
           zips = sorted(Path('release-zips').glob('*.zip'))
           if not zips:
               raise SystemExit('No .zip assets found in the release.')
@@ -88,6 +91,7 @@ jobs:
           with out.open('a', encoding='utf-8') as fh:
               fh.write('chunk_matrix=' + json.dumps({'include': chunk_rows}, separators=(',', ':')) + '\n')
               fh.write('video_matrix=' + json.dumps({'include': video_rows}, separators=(',', ':')) + '\n')
+              fh.write('chunk_max_parallel=' + str(max(1, videos_parallel * chunk_workers)) + '\n')
           print(f'Found {len(zips)} zip(s). Rendering each with {chunk_workers} chunk worker(s).')
           PY
 
@@ -96,6 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      max-parallel: ${{ fromJSON(needs.find-release-zips.outputs.chunk_max_parallel) }}
       matrix: ${{ fromJSON(needs.find-release-zips.outputs.chunk_matrix) }}
     steps:
       - name: Checkout renderer
@@ -125,6 +130,7 @@ jobs:
         env:
           CHUNK_INDEX: ${{ matrix.chunk_index }}
           CHUNK_COUNT: ${{ matrix.chunk_count }}
+          REQUESTED_CONCURRENCY: ${{ inputs.remotion_concurrency }}
         run: |
           python3 - <<'PY'
           import json
@@ -178,7 +184,7 @@ jobs:
           start = min(start, total_frames - 1)
           end = min(max(end, start), total_frames - 1)
 
-          requested = 2
+          requested = positive_int(os.environ.get('REQUESTED_CONCURRENCY'), 2)
           # GitHub hosted ubuntu runners usually expose 2 CPU cores. Remotion errors if this is higher.
           safe_concurrency = min(requested, os.cpu_count() or requested)
 
@@ -199,8 +205,7 @@ jobs:
         run: |
           npx remotion render src/index.ts "${{ steps.detect.outputs.composition }}" "out/${{ matrix.stem }}_chunk_${{ matrix.chunk_number }}.mp4" \
             --frames="${{ steps.detect.outputs.start }}-${{ steps.detect.outputs.end }}" \
-            --concurrency="${{ steps.detect.outputs.safe_concurrency }}" \
-            --scale="${{ inputs.render_scale }}"
+            --concurrency="${{ steps.detect.outputs.safe_concurrency }}"
 
       - name: Upload rendered chunk
         uses: actions/upload-artifact@v4
@@ -215,6 +220,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      max-parallel: ${{ fromJSON(inputs.videos_parallel) }}
       matrix: ${{ fromJSON(needs.find-release-zips.outputs.video_matrix) }}
     steps:
       - name: Checkout renderer
