@@ -109,8 +109,7 @@ const ArchiveSceneFrame = ({
       extrapolateRight: 'clamp',
     }),
   );
-  const transform = imageTransform(scene, progress, frame);
-  const gateJitter = Math.sin((frame + scene.index * 11) * 0.55) * 0.9;
+  const transform = imageTransform(scene, progress);
   const focusBlur = scene.index === 1
     ? interpolate(frame, [0, 14, 42], [8, 2.5, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})
     : 0;
@@ -121,18 +120,23 @@ const ArchiveSceneFrame = ({
 
   return (
     <AbsoluteFill style={{...styles.scene, opacity: fade}}>
-      <AbsoluteFill
-        style={{
-          ...styles.imageWrap,
-          transform: `translate(${gateJitter}px, ${-gateJitter * 0.55}px)`,
-        }}
-      >
+      <AbsoluteFill style={styles.imageBackgroundWrap}>
+        <Img
+          src={staticFile(scene.image)}
+          style={{
+            ...styles.imageBackground,
+            transform,
+            filter: `${imageFilter(scene)} blur(34px)`,
+          }}
+        />
+      </AbsoluteFill>
+      <AbsoluteFill style={styles.imageWrap}>
         <Img
           src={staticFile(scene.image)}
           style={{
             ...styles.image,
             transform,
-            filter: `${imageFilter(scene, frame)} blur(${focusBlur}px)`,
+            filter: `${imageFilter(scene)} blur(${focusBlur}px)`,
           }}
         />
       </AbsoluteFill>
@@ -206,43 +210,52 @@ const HookSceneFrame = ({
   );
 };
 
-const imageTransform = (scene: ArchiveScene, progress: number, frame: number) => {
-  const pulse = Math.sin(frame * 0.03 + scene.index) * 0.001;
-  const zoom = scene.motion === 'pull' ? 1.025 - progress * 0.018 : 1.006 + progress * 0.019;
-  const pan = 12 * (progress - 0.5);
-  const drift = Math.sin(progress * Math.PI * 2 + scene.index) * 3;
+const smooth = (value: number) => value * value * (3 - 2 * value);
+
+const imageTransform = (scene: ArchiveScene, progress: number) => {
+  const eased = smooth(progress);
+  const zoom = scene.motion === 'pull' ? 1.034 - eased * 0.026 : 1.006 + eased * 0.028;
+  const pan = 10 * (eased - 0.5);
 
   if (scene.motion === 'pan_left') {
-    return `scale(${zoom + pulse}) translateX(${pan}px) translateY(${drift}px)`;
+    return `scale(${zoom}) translateX(${pan}px) translateY(${-eased * 3}px)`;
   }
   if (scene.motion === 'pan_right') {
-    return `scale(${zoom + pulse}) translateX(${-pan}px) translateY(${drift}px)`;
+    return `scale(${zoom}) translateX(${-pan}px) translateY(${-eased * 3}px)`;
   }
   if (scene.motion === 'scanner') {
-    return `scale(${1.018 + pulse}) translateX(${Math.sin(frame * 0.012) * 5}px) translateY(${progress * -6}px)`;
+    return `scale(${1.014 + eased * 0.018}) translateY(${-eased * 6}px)`;
   }
   if (scene.motion === 'drift') {
-    return `scale(${1.014 + pulse}) translateX(${Math.sin(frame * 0.018) * 6}px) translateY(${Math.cos(frame * 0.014) * 4}px)`;
+    return `scale(${1.010 + eased * 0.026}) translateX(${pan * 0.65}px)`;
   }
-  return `scale(${zoom + pulse}) translateY(${scene.motion === 'slow_push' ? -progress * 6 : drift}px)`;
+  return `scale(${zoom}) translateY(${scene.motion === 'slow_push' ? -eased * 5 : 0}px)`;
 };
 
-const imageFilter = (scene: ArchiveScene, frame: number) => {
-  const flicker = Math.sin(frame * 0.39 + scene.index) * 0.035;
+const imageFilter = (scene: ArchiveScene, frame?: number) => {
+  const flicker = typeof frame === 'number' ? Math.sin(frame * 0.39 + scene.index) * 0.035 : 0;
   const contrast = scene.mode === 'dossier' ? 1.18 : 1.08;
   return `sepia(0.28) saturate(0.78) contrast(${contrast}) brightness(${0.84 + flicker})`;
 };
 
 const FilmDamage = ({frame, scene}: {frame: number; scene: ArchiveScene}) => {
-  const scratch = 14 + ((scene.index * 73 + frame * 3) % 1600);
-  const dustA = (scene.index * 97 + frame * 5) % 1920;
-  const dustB = (scene.index * 41 + frame * 7) % 1080;
+  if (scene.hook) {
+    const scratch = 14 + ((scene.index * 73 + frame * 3) % 1600);
+    const dustA = (scene.index * 97 + frame * 5) % 1920;
+    const dustB = (scene.index * 41 + frame * 7) % 1080;
+    return (
+      <AbsoluteFill style={styles.damage}>
+        <div style={{...styles.grain, opacity: 0.08 + Math.abs(Math.sin(frame * 0.47)) * 0.035}} />
+        <div style={{...styles.scratch, left: scratch, opacity: frame % 9 < 5 ? 0.22 : 0.04}} />
+        <div style={{...styles.dust, left: dustA, top: dustB, opacity: frame % 17 < 3 ? 0.38 : 0}} />
+        <div style={{...styles.filmGate, opacity: 0.18 + Math.sin(frame * 0.11) * 0.04}} />
+      </AbsoluteFill>
+    );
+  }
   return (
     <AbsoluteFill style={styles.damage}>
-      <div style={{...styles.grain, opacity: 0.08 + Math.abs(Math.sin(frame * 0.47)) * 0.035}} />
-      <div style={{...styles.scratch, left: scratch, opacity: frame % 9 < 5 ? 0.22 : 0.04}} />
-      <div style={{...styles.dust, left: dustA, top: dustB, opacity: frame % 17 < 3 ? 0.38 : 0}} />
-      <div style={{...styles.filmGate, opacity: 0.18 + Math.sin(frame * 0.11) * 0.04}} />
+      <div style={{...styles.grain, opacity: 0.075}} />
+      <div style={{...styles.filmGate, opacity: 0.14}} />
     </AbsoluteFill>
   );
 };
@@ -406,6 +419,18 @@ const styles: Record<string, CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
+  },
+  imageBackgroundWrap: {
+    inset: 0,
+    overflow: 'hidden',
+    backgroundColor: '#080706',
+  },
+  imageBackground: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    transformOrigin: 'center center',
+    opacity: 0.64,
   },
   image: {
     width: '100%',
