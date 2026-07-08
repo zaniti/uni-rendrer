@@ -39,7 +39,12 @@ export const ArchiveDocumentary = ({data}: {data: ArchiveData}) => {
         const durationInFrames = Math.max(1, Math.ceil((scene.end - scene.start) * fps));
         return (
           <Sequence key={scene.index} from={from} durationInFrames={durationInFrames}>
-            <ArchiveSceneFrame scene={scene} durationInFrames={durationInFrames} />
+            <ArchiveSceneFrame
+              scene={scene}
+              durationInFrames={durationInFrames}
+              markerTextStyle={data.markerTextStyle ?? 'small_red_note'}
+              subtitlesEnabled={data.subtitlesEnabled !== false}
+            />
           </Sequence>
         );
       })}
@@ -92,9 +97,13 @@ const resolveAudioSrc = (src: string) => {
 const ArchiveSceneFrame = ({
   scene,
   durationInFrames,
+  markerTextStyle,
+  subtitlesEnabled,
 }: {
   scene: ArchiveScene;
   durationInFrames: number;
+  markerTextStyle?: ArchiveData['markerTextStyle'];
+  subtitlesEnabled: boolean;
 }) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
@@ -145,6 +154,7 @@ const ArchiveSceneFrame = ({
       <AbsoluteFill style={styles.vignette} />
       <FilmDamage frame={frame} scene={scene} />
       <MomentAccent scene={scene} frame={frame} durationInFrames={durationInFrames} />
+      <MarkerOverlay scene={scene} frame={frame} durationInFrames={durationInFrames} textStyle={markerTextStyle} subtitlesEnabled={subtitlesEnabled} />
       {scene.index === 1 ? <IntroPrintReveal frame={frame} /> : null}
     </AbsoluteFill>
   );
@@ -358,6 +368,294 @@ const MomentAccent = ({
   return null;
 };
 
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+type MarkerPoint = {x: number; y: number};
+
+const toPixelBox = (box: NonNullable<ArchiveScene['marker']>['box']) => {
+  const x1 = (box.x / 100) * 1920;
+  const y1 = (box.y / 100) * 1080;
+  const x2 = ((box.x + box.w) / 100) * 1920;
+  const y2 = ((box.y + box.h) / 100) * 1080;
+  return {x1, y1, x2, y2, cx: (x1 + x2) / 2, cy: (y1 + y2) / 2};
+};
+
+const toPoint = (point: {x: number; y: number} | undefined, fallback: MarkerPoint) => {
+  if (!point || (point.x === 0 && point.y === 0)) {
+    return fallback;
+  }
+  return {x: (point.x / 100) * 1920, y: (point.y / 100) * 1080};
+};
+
+const labelBoxToPixels = (box?: {x: number; y: number; w: number; h: number}) => {
+  if (!box || box.w <= 0 || box.h <= 0) return null;
+  const x1 = (box.x / 100) * 1920;
+  const y1 = (box.y / 100) * 1080;
+  const x2 = ((box.x + box.w) / 100) * 1920;
+  const y2 = ((box.y + box.h) / 100) * 1080;
+  return {x1, y1, x2, y2, cx: (x1 + x2) / 2, cy: (y1 + y2) / 2};
+};
+
+const markerTextPosition = (
+  text: string,
+  marker: NonNullable<ArchiveScene['marker']>,
+  box: ReturnType<typeof toPixelBox>,
+  subtitlesEnabled: boolean,
+) => {
+  const approxWidth = Math.max(90, text.length * 34);
+  const approxHeight = 72;
+  const safeBottom = subtitlesEnabled ? 790 : 1000;
+  const safeTop = 44;
+  const clampLabel = (x: number, y: number) => ({
+    x: clamp(x, 54, 1920 - approxWidth - 54),
+    y: clamp(y, safeTop, safeBottom - approxHeight),
+  });
+
+  const visionLabel = labelBoxToPixels(marker.label_box);
+  if (visionLabel) {
+    return clampLabel(visionLabel.cx - approxWidth / 2, visionLabel.cy - approxHeight / 2);
+  }
+
+  if (marker.type === 'measure') {
+    return clampLabel(box.cx - approxWidth / 2, box.cy - approxHeight - 24);
+  }
+  if (marker.type === 'arrow' || marker.type === 'circle_arrow') {
+    const arrowStart = toPoint(marker.arrow_from, {x: clamp(box.x1 - 120, 70, 1850), y: clamp(box.y1 - 76, 70, 1010)});
+    return clampLabel(arrowStart.x - approxWidth * 0.25, arrowStart.y - approxHeight - 18);
+  }
+  if (marker.type === 'underline') {
+    return clampLabel(box.cx - approxWidth / 2, box.y1 - approxHeight - 18);
+  }
+  if (marker.type === 'bracket') {
+    return clampLabel(box.x1 + 24, box.y1 - approxHeight - 18);
+  }
+  if (marker.type === 'word') {
+    return clampLabel(box.cx - approxWidth / 2, box.cy - approxHeight / 2);
+  }
+
+  const hasRoomAbove = box.y1 - approxHeight - 46 >= safeTop;
+  if (hasRoomAbove) {
+    return clampLabel(box.cx - approxWidth / 2, box.y1 - approxHeight - 34);
+  }
+  const hasRoomBelow = box.y2 + approxHeight + 42 <= safeBottom;
+  if (hasRoomBelow) {
+    return clampLabel(box.cx - approxWidth / 2, box.y2 + 26);
+  }
+  // Huge circles often fill the frame; put the label inside but away from the stroke.
+  return clampLabel(box.cx - approxWidth / 2, box.y1 + 82);
+};
+
+const hashString = (value: string) => {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash * 31 + value.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+};
+
+const roughRandom = (seed: number) => {
+  const value = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+  return value - Math.floor(value);
+};
+
+const roughJitter = (seed: number, amount: number) => (roughRandom(seed) * 2 - 1) * amount;
+
+const roughLinePath = (from: MarkerPoint, to: MarkerPoint, seed: number, progress: number, curve = true) => {
+  if (progress <= 0) return '';
+  const steps = 44;
+  const visible = Math.max(2, Math.ceil(steps * clamp(progress, 0, 1)));
+  const mid = {
+    x: (from.x + to.x) / 2 + (curve ? roughJitter(seed + 11, 28) : 0),
+    y: (from.y + to.y) / 2 + (curve ? roughJitter(seed + 23, 18) : 0),
+  };
+  const points: MarkerPoint[] = [];
+  for (let i = 0; i < visible; i++) {
+    const t = i / Math.max(1, steps - 1);
+    const x = curve
+      ? (1 - t) * (1 - t) * from.x + 2 * (1 - t) * t * mid.x + t * t * to.x
+      : from.x + (to.x - from.x) * t;
+    const y = curve
+      ? (1 - t) * (1 - t) * from.y + 2 * (1 - t) * t * mid.y + t * t * to.y
+      : from.y + (to.y - from.y) * t;
+    points.push({x: x + roughJitter(seed + i * 5, 1.65), y: y + roughJitter(seed + i * 7, 1.65)});
+  }
+  return `M ${points.map((point) => `${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' L ')}`;
+};
+
+const roughEllipsePath = (box: ReturnType<typeof toPixelBox>, seed: number, progress: number, padX = 22, padY = 22) => {
+  if (progress <= 0) return '';
+  const total = 176;
+  const visible = Math.max(3, Math.ceil(total * clamp(progress, 0, 1)));
+  const rx = Math.max(34, (box.x2 - box.x1) / 2 + padX);
+  const ry = Math.max(28, (box.y2 - box.y1) / 2 + padY);
+  const points: MarkerPoint[] = [];
+  for (let i = 0; i < visible; i++) {
+    const angle = -Math.PI / 2 + (Math.PI * 2 * i) / total + roughJitter(seed + i * 3, 0.0025);
+    const wobbleX = 1 + roughJitter(seed + i * 13, 0.006);
+    const wobbleY = 1 + roughJitter(seed + i * 17, 0.006);
+    points.push({
+      x: box.cx + Math.cos(angle) * rx * wobbleX + roughJitter(seed + i * 19, 0.45),
+      y: box.cy + Math.sin(angle) * ry * wobbleY + roughJitter(seed + i * 29, 0.45),
+    });
+  }
+  const close = progress > 0.995 ? ' Z' : '';
+  return `M ${points.map((point) => `${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' L ')}${close}`;
+};
+
+const MarkerOverlay = ({
+  scene,
+  frame,
+  durationInFrames,
+  textStyle,
+  subtitlesEnabled,
+}: {
+  scene: ArchiveScene;
+  frame: number;
+  durationInFrames: number;
+  textStyle?: ArchiveData['markerTextStyle'];
+  subtitlesEnabled: boolean;
+}) => {
+  const marker = scene.marker;
+  if (!marker || scene.hook) {
+    return null;
+  }
+  const draw = interpolate(frame, [5, 24], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
+  const fadeOut = interpolate(frame, [Math.max(0, durationInFrames - 10), durationInFrames], [1, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
+  const opacity = Math.min(1, interpolate(frame, [3, 14], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})) * fadeOut;
+  const box = toPixelBox(marker.box);
+  const start = toPoint(marker.arrow_from, {x: clamp(box.x1 - 120, 70, 1850), y: clamp(box.y1 - 76, 70, 1010)});
+  const end = toPoint(marker.arrow_to, {x: box.cx, y: box.cy});
+  const stroke = 'rgba(187, 0, 0, 0.56)';
+  const strokeStrong = 'rgba(192, 0, 0, 0.64)';
+  const text = (marker.text ?? '').trim();
+  const textPos = markerTextPosition(text, marker, box, subtitlesEnabled);
+  const sketchPhase = Math.floor(frame / 2);
+  const sceneSeed = scene.index * 1009 + sketchPhase * 41;
+
+  const roughLine = (from: MarkerPoint, to: MarkerPoint, key: string, strong = false, curve = true, lineProgress = draw) => {
+    const baseSeed = sceneSeed + hashString(key) * 7;
+    return (
+      <g key={key} stroke={strong ? strokeStrong : stroke} strokeLinecap="round" fill="none">
+        {[0, 1, 2].map((pass) => (
+          <path
+            key={`${key}-${pass}`}
+            d={roughLinePath(from, to, baseSeed + pass * 307, lineProgress, curve)}
+            strokeWidth={Math.max(2, (strong ? 7 : 6) - pass)}
+            opacity={pass === 0 ? 1 : 0.34}
+          />
+        ))}
+      </g>
+    );
+  };
+
+  const roughEllipse = (key: string, padX = 28, padY = 28, ellipseProgress = draw) => {
+    const baseSeed = sceneSeed + hashString(key) * 11;
+    return (
+      <g key={key} stroke={stroke} strokeLinecap="round" fill="none">
+        {[0, 1, 2].map((pass) => (
+          <path
+            key={`${key}-${pass}`}
+            d={roughEllipsePath(box, baseSeed + pass * 503, ellipseProgress, padX - pass * 8, padY - pass * 8)}
+            strokeWidth={Math.max(2, 6 - pass)}
+            opacity={pass === 0 ? 1 : 0.2}
+          />
+        ))}
+      </g>
+    );
+  };
+
+  const arrowHead = (from: MarkerPoint, to: MarkerPoint, key = 'arrow-head') => {
+    const angle = Math.atan2(to.y - from.y, to.x - from.x);
+    const left = {x: to.x + Math.cos(angle + 2.55) * 48, y: to.y + Math.sin(angle + 2.55) * 48};
+    const right = {x: to.x + Math.cos(angle - 2.55) * 48, y: to.y + Math.sin(angle - 2.55) * 48};
+    return (
+      <>
+        {roughLine(to, left, `${key}-left`, true, false, 1)}
+        {roughLine(to, right, `${key}-right`, true, false, 1)}
+      </>
+    );
+  };
+
+  const markerShape = () => {
+    if (marker.type === 'arrow') {
+      return (
+        <g>
+          {roughLine(start, end, 'arrow-main', true, true)}
+          {draw > 0.82 ? arrowHead(start, end) : null}
+        </g>
+      );
+    }
+    if (marker.type === 'measure') {
+      return (
+        <g>
+          {roughLine({x: box.x1, y: box.cy}, {x: box.x2, y: box.cy}, 'measure-main', true, false)}
+          {draw > 0.82 ? roughLine({x: box.x1, y: box.cy - 42}, {x: box.x1, y: box.cy + 42}, 'measure-left', true, false, 1) : null}
+          {draw > 0.82 ? roughLine({x: box.x2, y: box.cy - 42}, {x: box.x2, y: box.cy + 42}, 'measure-right', true, false, 1) : null}
+        </g>
+      );
+    }
+    if (marker.type === 'bracket') {
+      const edge = 58;
+      return (
+        <g>
+          {roughLine({x: box.x1, y: box.y1}, {x: box.x1 + edge, y: box.y1}, 'b1', true, false)}
+          {roughLine({x: box.x1, y: box.y1}, {x: box.x1, y: box.y2}, 'b2', true, false)}
+          {roughLine({x: box.x1, y: box.y2}, {x: box.x1 + edge, y: box.y2}, 'b3', true, false)}
+          {roughLine({x: box.x2, y: box.y1}, {x: box.x2 - edge, y: box.y1}, 'b4', true, false)}
+          {roughLine({x: box.x2, y: box.y1}, {x: box.x2, y: box.y2}, 'b5', true, false)}
+          {roughLine({x: box.x2, y: box.y2}, {x: box.x2 - edge, y: box.y2}, 'b6', true, false)}
+        </g>
+      );
+    }
+    if (marker.type === 'underline') {
+      return roughLine({x: box.x1, y: box.y2 + 22}, {x: box.x2, y: box.y2 + 22}, 'underline', true, false);
+    }
+    if (marker.type === 'word') {
+      return null;
+    }
+    return (
+      <g>
+        {roughEllipse('circle-primary', 22, 22)}
+        {marker.type === 'circle_arrow' && draw > 0.18 ? (
+          <g>
+            {roughLine(start, end, 'circle-arrow-main', true, true)}
+            {draw > 0.82 ? arrowHead(start, end, 'circle-arrow-head') : null}
+          </g>
+        ) : null}
+      </g>
+    );
+  };
+
+  const textOpacity = interpolate(frame, [12, 28], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
+  const textJitterX = roughJitter(sceneSeed + 701, 1.25);
+  const textJitterY = roughJitter(sceneSeed + 907, 1.0);
+
+  return (
+    <AbsoluteFill style={{...styles.markerLayer, opacity}}>
+      <svg viewBox="0 0 1920 1080" width="100%" height="100%" style={styles.markerSvg}>
+        {markerShape()}
+      </svg>
+      {text ? (
+        <div
+          style={{
+            ...(textStyle === 'harsh_black' ? styles.markerTextHarshBlack : styles.markerTextSmallRed),
+            left: textPos.x,
+            top: textPos.y,
+            opacity: textOpacity * (0.92 + roughRandom(sceneSeed + 337) * 0.08),
+            transform: `translate(${textJitterX}px, ${textJitterY}px)`,
+          }}
+        >
+          {text}
+        </div>
+      ) : null}
+    </AbsoluteFill>
+  );
+};
+
 const Captions = ({captions, startAt}: {captions: ArchiveCaption[]; startAt: number}) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
@@ -490,6 +788,39 @@ const styles: Record<string, CSSProperties> = {
   },
   accentLayer: {
     pointerEvents: 'none',
+  },
+  markerLayer: {
+    pointerEvents: 'none',
+    zIndex: 7,
+  },
+  markerSvg: {
+    position: 'absolute',
+    inset: 0,
+    overflow: 'visible',
+  },
+  markerTextSmallRed: {
+    position: 'absolute',
+    color: 'rgba(187,0,0,0.58)',
+    fontFamily: 'Marker Felt, Noteworthy, Bradley Hand, Comic Sans MS, cursive',
+    fontSize: 58,
+    fontWeight: 500,
+    letterSpacing: 1.2,
+    lineHeight: 1,
+    textTransform: 'uppercase',
+    mixBlendMode: 'multiply',
+    filter: 'blur(0.2px)',
+  },
+  markerTextHarshBlack: {
+    position: 'absolute',
+    color: 'rgba(17,14,12,0.74)',
+    fontFamily: 'Chalkduster, Marker Felt, Bradley Hand, Comic Sans MS, cursive',
+    fontSize: 66,
+    fontWeight: 700,
+    letterSpacing: 1,
+    lineHeight: 1,
+    textTransform: 'uppercase',
+    mixBlendMode: 'multiply',
+    filter: 'blur(0.35px)',
   },
   scanAccent: {
     position: 'absolute',

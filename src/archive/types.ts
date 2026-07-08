@@ -6,6 +6,19 @@ export type ArchiveMode =
   | 'memory'
   | 'number';
 
+export type ArchiveMarker = {
+  scene: number;
+  type: 'circle' | 'arrow' | 'circle_arrow' | 'underline' | 'bracket' | 'measure' | 'word';
+  text?: string;
+  target?: string;
+  why?: string;
+  box: {x: number; y: number; w: number; h: number};
+  label_box?: {x: number; y: number; w: number; h: number};
+  arrow_from?: {x: number; y: number};
+  arrow_to?: {x: number; y: number};
+  confidence?: number;
+};
+
 export type ArchiveScene = {
   index: number;
   text: string;
@@ -21,6 +34,7 @@ export type ArchiveScene = {
   accent?: string;
   sfx?: string;
   hook?: boolean;
+  marker?: ArchiveMarker;
 };
 
 export type ArchiveCaption = {
@@ -35,6 +49,8 @@ export type ArchiveData = {
   duration: number;
   audio: string;
   subtitlesEnabled?: boolean;
+  markerOverlaysEnabled?: boolean;
+  markerTextStyle?: 'small_red_note' | 'harsh_black';
   backgroundAudio?: string;
   backgroundVolume?: number;
   hookSceneCount?: number;
