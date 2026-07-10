@@ -1,6 +1,8 @@
 import {
   AbsoluteFill,
   Audio,
+  continueRender,
+  delayRender,
   Img,
   Sequence,
   interpolate,
@@ -9,10 +11,39 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from 'remotion';
+import {useEffect, useState} from 'react';
 import type {CSSProperties} from 'react';
 import type {ArchiveCaption, ArchiveData, ArchiveScene} from './types';
 
+const MARKER_FONT_FAMILY = 'ArchiveMarkerHand';
+
+const useArchiveMarkerFont = () => {
+  const [handle] = useState(() => delayRender('Loading archive marker font'));
+
+  useEffect(() => {
+    let cancelled = false;
+    const font = new FontFace(
+      MARKER_FONT_FAMILY,
+      `url(${staticFile('fonts/PermanentMarker-Regular.ttf')}) format('truetype')`,
+    );
+
+    font
+      .load()
+      .then((loadedFont) => {
+        if (!cancelled) {
+          document.fonts.add(loadedFont);
+        }
+      })
+      .finally(() => continueRender(handle));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [handle]);
+};
+
 export const ArchiveDocumentary = ({data}: {data: ArchiveData}) => {
+  useArchiveMarkerFont();
   const {fps} = useVideoConfig();
   const hookEnd = data.scenes
     .filter((scene) => scene.hook)
@@ -801,7 +832,7 @@ const styles: Record<string, CSSProperties> = {
   markerTextSmallRed: {
     position: 'absolute',
     color: 'rgba(187,0,0,0.58)',
-    fontFamily: 'Marker Felt, Noteworthy, Bradley Hand, Comic Sans MS, cursive',
+    fontFamily: `${MARKER_FONT_FAMILY}, Marker Felt, Noteworthy, Bradley Hand, Comic Sans MS, cursive`,
     fontSize: 58,
     fontWeight: 500,
     letterSpacing: 1.2,
@@ -813,7 +844,7 @@ const styles: Record<string, CSSProperties> = {
   markerTextHarshBlack: {
     position: 'absolute',
     color: 'rgba(17,14,12,0.74)',
-    fontFamily: 'Chalkduster, Marker Felt, Bradley Hand, Comic Sans MS, cursive',
+    fontFamily: `${MARKER_FONT_FAMILY}, Chalkduster, Marker Felt, Bradley Hand, Comic Sans MS, cursive`,
     fontSize: 66,
     fontWeight: 700,
     letterSpacing: 1,

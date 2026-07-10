@@ -1,5 +1,8 @@
 node_modules/
-public/
+public/*
+!public/fonts/
+public/fonts/*
+!public/fonts/PermanentMarker-Regular.ttf
 out/
 release-zips/
 rendered/

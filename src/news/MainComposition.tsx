@@ -18,7 +18,6 @@ type Props = {
 };
 
 const bg = "#070B12";
-const panel = "#0D1420";
 const panelSoft = "rgba(13, 20, 32, 0.86)";
 const red = "#E63232";
 const blue = "#2F7DF6";
@@ -660,7 +659,6 @@ export const MainComposition: React.FC<Props> = ({data}) => {
               <OffthreadVideo
                 src={staticFile(data.background)}
                 muted
-                loop
                 style={{width: "100%", height: "100%", objectFit: "cover", filter: "brightness(0.48) saturate(0.9)"}}
               />
             </AbsoluteFill>
