@@ -51,6 +51,8 @@ export type ArchiveData = {
   subtitlesEnabled?: boolean;
   markerOverlaysEnabled?: boolean;
   markerTextStyle?: 'small_red_note' | 'harsh_black';
+  markerFont?: 'homemade_apple' | 'reenie_beanie';
+  markerAllCaps?: boolean;
   backgroundAudio?: string;
   backgroundVolume?: number;
   hookSceneCount?: number;

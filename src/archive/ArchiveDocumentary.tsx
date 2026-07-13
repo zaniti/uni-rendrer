@@ -15,23 +15,31 @@ import {useEffect, useState} from 'react';
 import type {CSSProperties} from 'react';
 import type {ArchiveCaption, ArchiveData, ArchiveScene} from './types';
 
-const MARKER_FONT_FAMILY = 'ArchiveMarkerHand';
+const MARKER_FONT_FAMILIES = {
+  homemade_apple: 'ArchiveMarkerHomemadeApple',
+  reenie_beanie: 'ArchiveMarkerReenieBeanie',
+} as const;
 
-const useArchiveMarkerFont = () => {
-  const [handle] = useState(() => delayRender('Loading archive marker font'));
+const useArchiveMarkerFonts = () => {
+  const [handle] = useState(() => delayRender('Loading archive marker fonts'));
 
   useEffect(() => {
     let cancelled = false;
-    const font = new FontFace(
-      MARKER_FONT_FAMILY,
-      `url(${staticFile('fonts/PermanentMarker-Regular.ttf')}) format('truetype')`,
-    );
+    const fonts = [
+      new FontFace(
+        MARKER_FONT_FAMILIES.homemade_apple,
+        `url(${staticFile('fonts/HomemadeApple-Regular.ttf')}) format('truetype')`,
+      ),
+      new FontFace(
+        MARKER_FONT_FAMILIES.reenie_beanie,
+        `url(${staticFile('fonts/ReenieBeanie-Regular.ttf')}) format('truetype')`,
+      ),
+    ];
 
-    font
-      .load()
-      .then((loadedFont) => {
+    Promise.all(fonts.map((font) => font.load()))
+      .then((loadedFonts) => {
         if (!cancelled) {
-          document.fonts.add(loadedFont);
+          loadedFonts.forEach((font) => document.fonts.add(font));
         }
       })
       .finally(() => continueRender(handle));
@@ -43,7 +51,7 @@ const useArchiveMarkerFont = () => {
 };
 
 export const ArchiveDocumentary = ({data}: {data: ArchiveData}) => {
-  useArchiveMarkerFont();
+  useArchiveMarkerFonts();
   const {fps} = useVideoConfig();
   const hookEnd = data.scenes
     .filter((scene) => scene.hook)
@@ -74,6 +82,8 @@ export const ArchiveDocumentary = ({data}: {data: ArchiveData}) => {
               scene={scene}
               durationInFrames={durationInFrames}
               markerTextStyle={data.markerTextStyle ?? 'small_red_note'}
+              markerFont={data.markerFont ?? 'homemade_apple'}
+              markerAllCaps={data.markerAllCaps !== false}
               subtitlesEnabled={data.subtitlesEnabled !== false}
             />
           </Sequence>
@@ -129,11 +139,15 @@ const ArchiveSceneFrame = ({
   scene,
   durationInFrames,
   markerTextStyle,
+  markerFont,
+  markerAllCaps,
   subtitlesEnabled,
 }: {
   scene: ArchiveScene;
   durationInFrames: number;
   markerTextStyle?: ArchiveData['markerTextStyle'];
+  markerFont: NonNullable<ArchiveData['markerFont']>;
+  markerAllCaps: boolean;
   subtitlesEnabled: boolean;
 }) => {
   const frame = useCurrentFrame();
@@ -185,7 +199,7 @@ const ArchiveSceneFrame = ({
       <AbsoluteFill style={styles.vignette} />
       <FilmDamage frame={frame} scene={scene} />
       <MomentAccent scene={scene} frame={frame} durationInFrames={durationInFrames} />
-      <MarkerOverlay scene={scene} frame={frame} durationInFrames={durationInFrames} textStyle={markerTextStyle} subtitlesEnabled={subtitlesEnabled} />
+      <MarkerOverlay scene={scene} frame={frame} durationInFrames={durationInFrames} textStyle={markerTextStyle} markerFont={markerFont} markerAllCaps={markerAllCaps} subtitlesEnabled={subtitlesEnabled} />
       {scene.index === 1 ? <IntroPrintReveal frame={frame} /> : null}
     </AbsoluteFill>
   );
@@ -539,12 +553,16 @@ const MarkerOverlay = ({
   frame,
   durationInFrames,
   textStyle,
+  markerFont,
+  markerAllCaps,
   subtitlesEnabled,
 }: {
   scene: ArchiveScene;
   frame: number;
   durationInFrames: number;
   textStyle?: ArchiveData['markerTextStyle'];
+  markerFont: NonNullable<ArchiveData['markerFont']>;
+  markerAllCaps: boolean;
   subtitlesEnabled: boolean;
 }) => {
   const marker = scene.marker;
@@ -674,6 +692,8 @@ const MarkerOverlay = ({
         <div
           style={{
             ...(textStyle === 'harsh_black' ? styles.markerTextHarshBlack : styles.markerTextSmallRed),
+            fontFamily: `${MARKER_FONT_FAMILIES[markerFont]}, Marker Felt, Noteworthy, Bradley Hand, Comic Sans MS, cursive`,
+            textTransform: markerAllCaps ? 'uppercase' : 'lowercase',
             left: textPos.x,
             top: textPos.y,
             opacity: textOpacity * (0.92 + roughRandom(sceneSeed + 337) * 0.08),
@@ -832,24 +852,20 @@ const styles: Record<string, CSSProperties> = {
   markerTextSmallRed: {
     position: 'absolute',
     color: 'rgba(187,0,0,0.58)',
-    fontFamily: `${MARKER_FONT_FAMILY}, Marker Felt, Noteworthy, Bradley Hand, Comic Sans MS, cursive`,
     fontSize: 58,
     fontWeight: 500,
     letterSpacing: 1.2,
     lineHeight: 1,
-    textTransform: 'uppercase',
     mixBlendMode: 'multiply',
     filter: 'blur(0.2px)',
   },
   markerTextHarshBlack: {
     position: 'absolute',
     color: 'rgba(17,14,12,0.74)',
-    fontFamily: `${MARKER_FONT_FAMILY}, Chalkduster, Marker Felt, Bradley Hand, Comic Sans MS, cursive`,
     fontSize: 66,
     fontWeight: 700,
     letterSpacing: 1,
     lineHeight: 1,
-    textTransform: 'uppercase',
     mixBlendMode: 'multiply',
     filter: 'blur(0.35px)',
   },
