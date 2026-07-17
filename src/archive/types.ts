@@ -53,6 +53,7 @@ export type ArchiveData = {
   markerTextStyle?: 'small_red_note' | 'harsh_black';
   markerFont?: 'homemade_apple' | 'reenie_beanie';
   markerAllCaps?: boolean;
+  contentLanguage?: 'english' | 'spanish';
   backgroundAudio?: string;
   backgroundVolume?: number;
   hookSceneCount?: number;

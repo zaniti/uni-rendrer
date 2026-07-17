@@ -1,4 +1,5 @@
 name: Render Release Zips
+run-name: Render ${{ inputs.release_tag }} · ${{ inputs.queue_id }}
 
 on:
   workflow_dispatch:
@@ -31,6 +32,10 @@ on:
           - "1"
           - "2"
         default: "1"
+      queue_id:
+        description: "Queue ID used to match this run in the desktop manager"
+        required: false
+        default: "manual"
 
 permissions:
   contents: write
