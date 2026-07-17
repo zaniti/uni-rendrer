@@ -60,6 +60,14 @@ def split_worker_budget(total: int, count: int) -> list[int]:
     return [base + (1 if index < remainder else 0) for index in range(count)]
 
 
+def display_run_status(status: str) -> str:
+    if status == "queued":
+        return "waiting for GitHub runner"
+    if status == "in_progress":
+        return "rendering"
+    return status or "submitted"
+
+
 def app_support_dir(create: bool = True) -> Path:
     if sys.platform == "darwin":
         base = Path.home() / "Library" / "Application Support" / APP_SUPPORT_NAME
@@ -235,6 +243,16 @@ class GitHubError(Exception):
     def __init__(self, message: str, status: int | None = None):
         super().__init__(message)
         self.status = status
+
+
+class SafeArtifactRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Do not leak GitHub authorization headers to artifact storage redirects."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected and urllib.parse.urlparse(req.full_url).netloc != urllib.parse.urlparse(newurl).netloc:
+            redirected.remove_header("Authorization")
+        return redirected
 
 
 class GitHubClient:
@@ -488,7 +506,8 @@ class GitHubClient:
     def download_artifact_archive(self, artifact_id: int, dest_zip: Path, progress=None) -> None:
         url = self.repo_path(f"/actions/artifacts/{artifact_id}/zip")
         req = urllib.request.Request(self._url(url), headers=self._headers(), method="GET")
-        with urllib.request.urlopen(req, timeout=900) as resp:
+        opener = urllib.request.build_opener(SafeArtifactRedirectHandler())
+        with opener.open(req, timeout=900) as resp:
             total = int(resp.headers.get("Content-Length") or 0)
             done = 0
             with dest_zip.open("wb") as fh:
@@ -633,6 +652,8 @@ class RenderQueueApp(RenderQueueBase):
         self.worker: threading.Thread | None = None
         self.busy = False
         self.client: GitHubClient | None = None
+        self.neat_opening = False
+        self.neat_download_queue: list[RenderJob] = []
 
         self.title(APP_NAME)
         self.geometry("1180x760")
@@ -679,8 +700,7 @@ class RenderQueueApp(RenderQueueBase):
         controls.pack(fill="x")
         ttk.Button(controls, text="Remove selected", command=self.remove_selected).pack(side="left")
         ttk.Button(controls, text="Auto assign v1-v10", command=self.auto_assign).pack(side="left", padx=(8, 0))
-        ttk.Button(controls, text="Clear releases", command=self.clear_releases, style="Danger.TButton").pack(side="left", padx=(8, 0))
-        ttk.Button(controls, text="Clear jobs", command=self.clear_render_jobs, style="Danger.TButton").pack(side="left", padx=(8, 0))
+        ttk.Button(controls, text="Clear all", command=self.clear_all, style="Danger.TButton").pack(side="left", padx=(8, 0))
 
         ttk.Label(controls, text="Total workers:").pack(side="left", padx=(28, 4))
         self.default_workers_var = tk.StringVar(value=str(self.settings.data.get("default_workers") or DEFAULT_WORKERS))
@@ -733,7 +753,7 @@ class RenderQueueApp(RenderQueueBase):
         columns = ("publish", "idx", "zip", "release", "scale", "workers", "status", "run", "result")
         self.tree = ttk.Treeview(table_card, columns=columns, show="headings", selectmode="extended")
         headings = {
-            "publish": "Publish",
+            "publish": "Selected",
             "idx": "#",
             "zip": "Zip",
             "release": "Release",
@@ -761,6 +781,8 @@ class RenderQueueApp(RenderQueueBase):
         actions.pack(fill="x", pady=(0, 10))
         ttk.Button(actions, text="Copy download link", command=self.copy_download_link).pack(side="left")
         ttk.Button(actions, text="Download jobs", command=self.download_selected).pack(side="left", padx=(8, 0))
+        self.neat_button = ttk.Button(actions, text="Download with Neat (Brave)", command=self.download_with_neat)
+        self.neat_button.pack(side="left", padx=(8, 0))
         ttk.Button(actions, text="Select download path", command=self.select_download_path).pack(side="left", padx=(8, 0))
         self.download_path_var = tk.StringVar(value=self.download_path_label())
         ttk.Label(actions, textvariable=self.download_path_var, style="Muted.TLabel").pack(side="left", padx=(10, 0), fill="x", expand=True)
@@ -989,10 +1011,11 @@ class RenderQueueApp(RenderQueueBase):
         return "copy"
 
     def remove_selected(self) -> None:
-        selected = set(self.tree.selection())
+        selected = {job.id for job in self.jobs if job.enabled}
         if not selected:
+            messagebox.showinfo("Nothing selected", "Check the Publish box for the rows you want to remove.")
             return
-        if not messagebox.askyesno("Remove selected", f"Remove {len(selected)} selected row(s) from the queue?"):
+        if not messagebox.askyesno("Remove selected", f"Remove {len(selected)} checked row(s) from the local queue?"):
             return
         self.jobs = [job for job in self.jobs if job.id not in selected]
         self.redistribute_workers()
@@ -1028,53 +1051,29 @@ class RenderQueueApp(RenderQueueBase):
         self.refresh_table()
         self.log(f"Updated {len(selected)} selected row(s).")
 
-    def clear_releases(self) -> None:
+    def clear_all(self) -> None:
         client = self.ensure_client()
         if not client:
             return
         msg = (
-            f"This will delete GitHub releases {', '.join(RELEASE_TAGS)} in {self.settings.owner}/{self.settings.repo}.\n\n"
-            "It does not delete your local zip files. Continue?"
+            f"This will permanently delete all Render Release Zips workflow jobs, their artifacts, "
+            f"and renderer releases {', '.join(RELEASE_TAGS)} in {self.settings.owner}/{self.settings.repo}.\n\n"
+            "It does not delete your local ZIP files or rows from this app. Continue?"
         )
-        if not messagebox.askyesno("Clear releases", msg):
-            return
-        self.set_busy(True)
-        def worker() -> None:
-            try:
-                client.clear_releases(RELEASE_TAGS, self.event_log)
-                self.ui_events.put(("message", ("Releases cleared", "Renderer releases v1-v10 were cleared.")))
-            except GitHubError as exc:
-                if exc.status == 401:
-                    self.ui_events.put(("auth_failed", None))
-                else:
-                    self.ui_events.put(("error", ("Clear failed", str(exc))))
-            finally:
-                self.ui_events.put(("busy", False))
-        threading.Thread(target=worker, daemon=True).start()
-
-    def clear_render_jobs(self) -> None:
-        client = self.ensure_client()
-        if not client:
-            return
-        msg = (
-            f"This will permanently delete all Render Release Zips workflow jobs in "
-            f"{self.settings.owner}/{self.settings.repo}.\n\n"
-            "Deleting each job also deletes all artifacts attached to it. "
-            "It does not delete local zip files or GitHub release assets. Continue?"
-        )
-        if not messagebox.askyesno("Clear jobs", msg):
+        if not messagebox.askyesno("Clear all renderer data", msg):
             return
         self.set_busy(True)
 
         def worker() -> None:
             try:
                 count = client.clear_workflow_runs(self.settings.workflow_file, self.event_log)
-                self.ui_events.put(("message", ("Render jobs cleared", f"Deleted {count} workflow job(s) and their artifacts.")))
+                client.clear_releases(RELEASE_TAGS, self.event_log)
+                self.ui_events.put(("message", ("Renderer data cleared", f"Deleted {count} workflow job(s), their artifacts, and releases v1-v10.")))
             except GitHubError as exc:
                 if exc.status == 401:
                     self.ui_events.put(("auth_failed", None))
                 else:
-                    self.ui_events.put(("error", ("Render-job cleanup failed", str(exc))))
+                    self.ui_events.put(("error", ("Renderer cleanup failed", str(exc))))
             finally:
                 self.ui_events.put(("busy", False))
 
@@ -1176,7 +1175,7 @@ class RenderQueueApp(RenderQueueBase):
                         continue
                     job.run_id = str(run["id"])
                     job.run_url = str(run.get("html_url") or "")
-                    self.update_job(job, str(run.get("status") or "queued"))
+                    self.update_job(job, display_run_status(str(run.get("status") or "queued")))
                     self.save_queue()
                     unmatched.remove(job.id)
                     self.event_log(f"{job.zip_name}: GitHub run {job.run_id} linked and saved.")
@@ -1257,7 +1256,7 @@ class RenderQueueApp(RenderQueueBase):
                     status = str(run.get("status") or "queued")
                     conclusion = str(run.get("conclusion") or "")
                     if status != "completed":
-                        self.update_job(job, status)
+                        self.update_job(job, display_run_status(status))
                         continue
                     if conclusion != "success":
                         self.update_job(job, "failed", f"Workflow completed with conclusion: {conclusion or 'unknown'}")
@@ -1299,13 +1298,64 @@ class RenderQueueApp(RenderQueueBase):
         return True
 
     def copy_download_link(self) -> None:
-        jobs = [job for job in self.selected_jobs() if job.artifact_web_url]
-        if not jobs:
-            messagebox.showinfo("No download yet", "Select one or more completed rows with download-ready artifacts.")
+        job = self.first_selected_job()
+        if not job or not job.artifact_web_url:
+            messagebox.showinfo("No download yet", "Highlight one completed row with a download-ready artifact.")
             return
         self.clipboard_clear()
-        self.clipboard_append("\n".join(job.artifact_web_url for job in jobs))
-        self.log(f"Copied {len(jobs)} download link(s).")
+        self.clipboard_append(job.artifact_web_url)
+        self.log(f"Copied the download link for {job.zip_name}.")
+
+    def download_with_neat(self) -> None:
+        if self.neat_opening:
+            return
+        jobs = [job for job in self.jobs if job.enabled and job.artifact_web_url]
+        if not jobs:
+            messagebox.showinfo("No download yet", "Check one or more completed jobs with download-ready artifacts.")
+            return
+        brave_locations = [Path("/Applications/Brave Browser.app"), Path.home() / "Applications/Brave Browser.app"]
+        if sys.platform != "darwin" or not any(path.exists() for path in brave_locations):
+            messagebox.showerror("Brave not found", "Brave Browser was not found in Applications.")
+            return
+        self.neat_opening = True
+        self.neat_download_queue = list(jobs)
+        self.neat_button.configure(state="disabled")
+        self.log(f"Sending {len(jobs)} checked download(s) to Brave one at a time...")
+        self.open_next_neat_download()
+
+    def open_next_neat_download(self) -> None:
+        if not self.neat_download_queue:
+            self.neat_opening = False
+            self.neat_button.configure(state="normal")
+            messagebox.showinfo(
+                "Opened in Brave",
+                "Each checked artifact was opened separately in Brave. "
+                "The Neat Download Manager extension should list every download.",
+            )
+            return
+        job = self.neat_download_queue.pop(0)
+        try:
+            result = subprocess.run(
+                ["/usr/bin/open", "-a", "Brave Browser", job.artifact_web_url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=10,
+            )
+        except Exception as exc:
+            self.neat_opening = False
+            self.neat_download_queue = []
+            self.neat_button.configure(state="normal")
+            messagebox.showerror("Could not open Brave", str(exc))
+            return
+        if result.returncode != 0:
+            self.neat_opening = False
+            self.neat_download_queue = []
+            self.neat_button.configure(state="normal")
+            messagebox.showerror("Could not open Brave", result.stderr.strip() or "Brave Browser could not be opened.")
+            return
+        self.log(f"Sent to Brave/Neat: {job.zip_name}")
+        self.after(3000, self.open_next_neat_download)
 
     def download_path_label(self) -> str:
         path = Path(str(self.settings.data.get("download_dir") or Path.home() / "Downloads")).expanduser()
@@ -1322,9 +1372,9 @@ class RenderQueueApp(RenderQueueBase):
         self.log(f"Download folder set to {directory}.")
 
     def download_selected(self) -> None:
-        jobs = [job for job in self.selected_jobs() if job.artifact_id]
+        jobs = [job for job in self.jobs if job.enabled and job.artifact_id]
         if not jobs:
-            messagebox.showinfo("No download yet", "Select one or more completed rows with download-ready artifacts.")
+            messagebox.showinfo("No download yet", "Check one or more completed jobs with download-ready artifacts.")
             return
         client = self.ensure_client()
         if not client:
