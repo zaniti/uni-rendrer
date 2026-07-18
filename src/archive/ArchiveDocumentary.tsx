@@ -19,6 +19,8 @@ const MARKER_FONT_FAMILIES = {
   homemade_apple: 'ArchiveMarkerHomemadeApple',
   reenie_beanie: 'ArchiveMarkerReenieBeanie',
 } as const;
+const MULTILINGUAL_FALLBACK_FONT = 'ArchiveNotoSansCJK';
+const MULTILINGUAL_FALLBACK_STACK = `${MULTILINGUAL_FALLBACK_FONT}, sans-serif`;
 
 const useArchiveMarkerFonts = () => {
   const [handle] = useState(() => delayRender('Loading archive marker fonts'));
@@ -33,6 +35,10 @@ const useArchiveMarkerFonts = () => {
       new FontFace(
         MARKER_FONT_FAMILIES.reenie_beanie,
         `url(${staticFile('fonts/ReenieBeanie-Regular.ttf')}) format('truetype')`,
+      ),
+      new FontFace(
+        MULTILINGUAL_FALLBACK_FONT,
+        `url(${staticFile('fonts/NotoSansCJKjp-Regular.otf')}) format('opentype')`,
       ),
     ];
 
@@ -692,7 +698,7 @@ const MarkerOverlay = ({
         <div
           style={{
             ...(textStyle === 'harsh_black' ? styles.markerTextHarshBlack : styles.markerTextSmallRed),
-            fontFamily: `${MARKER_FONT_FAMILIES[markerFont]}, Marker Felt, Noteworthy, Bradley Hand, Comic Sans MS, cursive`,
+            fontFamily: `${MARKER_FONT_FAMILIES[markerFont]}, ${MULTILINGUAL_FALLBACK_STACK}`,
             textTransform: markerAllCaps ? 'uppercase' : 'lowercase',
             left: textPos.x,
             top: textPos.y,
@@ -741,7 +747,7 @@ const styles: Record<string, CSSProperties> = {
   stage: {
     backgroundColor: '#080706',
     color: '#f2eadc',
-    fontFamily: 'Georgia, Times New Roman, serif',
+    fontFamily: `Georgia, Times New Roman, ${MULTILINGUAL_FALLBACK_STACK}`,
   },
   empty: {
     backgroundColor: '#0c0a08',
@@ -910,7 +916,7 @@ const styles: Record<string, CSSProperties> = {
     padding: '13px 22px 14px 18px',
     backgroundColor: 'rgba(231,210,164,0.82)',
     color: '#1b120a',
-    fontFamily: 'Menlo, Monaco, monospace',
+    fontFamily: `Menlo, Monaco, ${MULTILINGUAL_FALLBACK_STACK}`,
     fontSize: 30,
     letterSpacing: 1.5,
     textTransform: 'uppercase',
@@ -955,7 +961,7 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: 'space-between',
     alignItems: 'center',
     zIndex: 8,
-    fontFamily: 'Menlo, Monaco, monospace',
+    fontFamily: `Menlo, Monaco, ${MULTILINGUAL_FALLBACK_STACK}`,
     fontWeight: 800,
     letterSpacing: 1.2,
   },
@@ -1038,7 +1044,7 @@ const styles: Record<string, CSSProperties> = {
     maxWidth: 1280,
     padding: '8px 22px 10px',
     color: '#fff2dc',
-    fontFamily: 'Georgia, Times New Roman, serif',
+    fontFamily: `Georgia, Times New Roman, ${MULTILINGUAL_FALLBACK_STACK}`,
     fontSize: 44,
     lineHeight: 1.14,
     textAlign: 'center',
