@@ -91,6 +91,7 @@ export const ArchiveDocumentary = ({data}: {data: ArchiveData}) => {
               markerFont={data.markerFont ?? 'homemade_apple'}
               markerAllCaps={data.markerAllCaps !== false}
               subtitlesEnabled={data.subtitlesEnabled !== false}
+              documentaryFilter={data.documentaryFilter ?? 'current_archival'}
             />
           </Sequence>
         );
@@ -148,6 +149,7 @@ const ArchiveSceneFrame = ({
   markerFont,
   markerAllCaps,
   subtitlesEnabled,
+  documentaryFilter,
 }: {
   scene: ArchiveScene;
   durationInFrames: number;
@@ -155,6 +157,7 @@ const ArchiveSceneFrame = ({
   markerFont: NonNullable<ArchiveData['markerFont']>;
   markerAllCaps: boolean;
   subtitlesEnabled: boolean;
+  documentaryFilter: NonNullable<ArchiveData['documentaryFilter']>;
 }) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
@@ -200,6 +203,21 @@ const ArchiveSceneFrame = ({
           }}
         />
       </AbsoluteFill>
+      {documentaryFilter === 'soft_edge_lens' ? (
+        <>
+          <AbsoluteFill style={styles.softEdgeChromaticWrap}>
+            <Img
+              src={staticFile(scene.image)}
+              style={{
+                ...styles.image,
+                transform: `${transform} translateX(-2px)`,
+                filter: `${imageFilter(scene)} grayscale(1) sepia(1) saturate(2.1) hue-rotate(118deg) blur(${focusBlur + 1.4}px)`,
+              }}
+            />
+          </AbsoluteFill>
+          <AbsoluteFill style={styles.softEdgeLens} />
+        </>
+      ) : null}
 
       <AbsoluteFill style={styles.softGrade} />
       <AbsoluteFill style={styles.vignette} />
@@ -792,6 +810,25 @@ const styles: Record<string, CSSProperties> = {
     height: '100%',
     objectFit: 'contain',
     transformOrigin: 'center center',
+  },
+  softEdgeChromaticWrap: {
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    opacity: 0.075,
+    mixBlendMode: 'screen',
+    WebkitMaskImage:
+      'radial-gradient(ellipse at center, transparent 0%, transparent 76%, rgba(0,0,0,0.18) 84%, rgba(0,0,0,0.72) 94%, black 100%)',
+    maskImage:
+      'radial-gradient(ellipse at center, transparent 0%, transparent 76%, rgba(0,0,0,0.18) 84%, rgba(0,0,0,0.72) 94%, black 100%)',
+  },
+  softEdgeLens: {
+    background:
+      'radial-gradient(ellipse at center, transparent 0%, transparent 75%, rgba(0,0,0,0.025) 82%, rgba(0,0,0,0.14) 93%, rgba(3,7,8,0.42) 100%)',
+    boxShadow: 'inset 0 0 42px rgba(0,0,0,0.16)',
+    pointerEvents: 'none',
   },
   softGrade: {
     background:

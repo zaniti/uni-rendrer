@@ -101,7 +101,7 @@ def safe_json_write(path: Path, data: Any) -> None:
 
 
 def parse_github_remote(repo_root: Path) -> tuple[str, str]:
-    default = ("zaniti", "uni-rendrer")
+    default = ("zaniti", "9543872")
     try:
         out = subprocess.check_output(
             ["git", "-C", str(repo_root), "config", "--get", "remote.origin.url"],
@@ -142,6 +142,9 @@ class SettingsStore:
             "updated_at": now_iso(),
         }
         self.data.update(safe_json_load(SETTINGS_PATH, {}))
+        if self.data.get("owner") == "zaniti" and self.data.get("repo") == "uni-rendrer":
+            self.data["repo"] = "9543872"
+            self.save()
 
     def save(self) -> None:
         self.data["updated_at"] = now_iso()
@@ -153,7 +156,7 @@ class SettingsStore:
 
     @property
     def repo(self) -> str:
-        return str(self.data.get("repo") or "uni-rendrer")
+        return str(self.data.get("repo") or "9543872")
 
     @property
     def branch(self) -> str:
