@@ -42,10 +42,14 @@ const useArchiveMarkerFonts = () => {
       ),
     ];
 
-    Promise.all(fonts.map((font) => font.load()))
-      .then((loadedFonts) => {
+    Promise.allSettled(fonts.map((font) => font.load()))
+      .then((fontResults) => {
         if (!cancelled) {
-          loadedFonts.forEach((font) => document.fonts.add(font));
+          fontResults.forEach((result) => {
+            if (result.status === 'fulfilled') {
+              document.fonts.add(result.value);
+            }
+          });
         }
       })
       .finally(() => continueRender(handle));
