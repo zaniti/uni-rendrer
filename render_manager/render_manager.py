@@ -1095,12 +1095,19 @@ class RenderQueueApp(RenderQueueBase):
         if len(targets) > len(RELEASE_TAGS):
             messagebox.showerror("Too many jobs", f"At most {len(RELEASE_TAGS)} jobs can launch in one batch.")
             return
+        releases = [job.release_tag for job in targets]
+        duplicate_releases = sorted({release for release in releases if releases.count(release) > 1})
+        if duplicate_releases:
+            messagebox.showerror(
+                "Duplicate releases",
+                "Each checked job needs a different release slot before bulk launch.\n\n"
+                f"Used more than once: {', '.join(duplicate_releases)}",
+            )
+            return
         missing = [job.zip_path for job in targets if not Path(job.zip_path).exists()]
         if missing:
             messagebox.showerror("Missing zip file", f"This file is missing:\n{missing[0]}")
             return
-        for index, job in enumerate(targets):
-            job.release_tag = RELEASE_TAGS[index]
         self.redistribute_workers(refresh=False)
         for job in targets:
             job.run_id = ""
