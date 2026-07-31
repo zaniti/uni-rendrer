@@ -43,6 +43,28 @@ export type ArchiveCaption = {
   text: string;
 };
 
+export type EvidenceIntroScene = {
+  slot: number;
+  role: 'reality' | 'evidence';
+  storyBasis?: string;
+  prompt: string;
+  image: string;
+  cropFocusX?: number;
+  cropFocusY?: number;
+  cropScale?: number;
+};
+
+export type ArchiveIntro = {
+  style: 'regular_hook' | 'evidence_montage';
+  duration: number;
+  imageCount: number;
+  narrationDelaySeconds?: number;
+  musicLeadInSeconds?: number;
+  musicIntroVolume?: number;
+  musicStoryVolume?: number;
+  scenes: EvidenceIntroScene[];
+};
+
 export type ArchiveData = {
   title: string;
   fps: number;
@@ -58,11 +80,14 @@ export type ArchiveData = {
   backgroundAudio?: string;
   backgroundVolume?: number;
   hookSceneCount?: number;
+  intro?: ArchiveIntro;
   captions?: ArchiveCaption[];
   sfx?: {
     projectorStart?: string;
     cameraClick?: string;
     paperSlide?: string;
+    introCameraSwitch?: string;
+    introFinalSnap?: string;
   };
   scenes: ArchiveScene[];
 };

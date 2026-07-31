@@ -125,6 +125,14 @@ export const Root = () => {
   const avatarFps = avatarData.fps || 30;
   const newsFps = newsData.fps || 30;
   const archiveFps = archiveData.fps || 30;
+  const archiveIntroDuration =
+    archiveData.intro?.style === 'evidence_montage'
+      ? archiveData.intro.duration || 0
+      : 0;
+  const archiveNarrationDelay =
+    archiveData.intro?.style === 'evidence_montage'
+      ? archiveData.intro.narrationDelaySeconds || 0
+      : 0;
   const cartoonFps = cartoonData.fps || 30;
   const cartoonSceneEnd = cartoonData.scenes.reduce((latest, scene) => Math.max(latest, scene.end || 0), 0);
   const cartoonDuration = cartoonData.duration_seconds || cartoonSceneEnd || 8;
@@ -152,7 +160,15 @@ export const Root = () => {
       <Composition
         id="ArchiveDocumentary"
         component={ArchiveDocumentary}
-        durationInFrames={Math.max(30, Math.ceil((archiveData.duration || 8) * archiveFps))}
+        durationInFrames={Math.max(
+          30,
+          Math.ceil(
+            ((archiveData.duration || 8) +
+              archiveIntroDuration +
+              archiveNarrationDelay) *
+              archiveFps,
+          ),
+        )}
         fps={archiveFps}
         width={1920}
         height={1080}

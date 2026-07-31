@@ -13,7 +13,12 @@ import {
 } from 'remotion';
 import {useEffect, useState} from 'react';
 import type {CSSProperties} from 'react';
-import type {ArchiveCaption, ArchiveData, ArchiveScene} from './types';
+import type {
+  ArchiveCaption,
+  ArchiveData,
+  ArchiveScene,
+  EvidenceIntroScene,
+} from './types';
 
 const MARKER_FONT_FAMILIES = {
   homemade_apple: 'ArchiveMarkerHomemadeApple',
@@ -63,6 +68,18 @@ const useArchiveMarkerFonts = () => {
 export const ArchiveDocumentary = ({data}: {data: ArchiveData}) => {
   useArchiveMarkerFonts();
   const {fps} = useVideoConfig();
+  const evidenceIntro =
+    data.intro?.style === 'evidence_montage' && data.intro.scenes.length
+      ? data.intro
+      : null;
+  const introFrames = evidenceIntro
+    ? Math.round(evidenceIntro.duration * fps)
+    : 0;
+  const narrationDelayFrames = evidenceIntro
+    ? Math.round((evidenceIntro.narrationDelaySeconds ?? 1) * fps)
+    : 0;
+  const narrationStartFrames = introFrames + narrationDelayFrames;
+  const firstSceneIndex = data.scenes[0]?.index;
   const hookEnd = data.scenes
     .filter((scene) => scene.hook)
     .reduce((latest, scene) => Math.max(latest, scene.end), 0);
@@ -78,14 +95,58 @@ export const ArchiveDocumentary = ({data}: {data: ArchiveData}) => {
 
   return (
     <AbsoluteFill style={styles.stage}>
-      {data.audio ? <Audio src={staticFile(data.audio)} /> : null}
-      {data.backgroundAudio ? (
-        <Audio src={resolveAudioSrc(data.backgroundAudio)} volume={data.backgroundVolume ?? 0.065} loop />
+      {evidenceIntro ? (
+        <Sequence from={0} durationInFrames={introFrames}>
+          <EvidenceMontage
+            scenes={evidenceIntro.scenes}
+            durationInFrames={introFrames}
+            sfx={data.sfx}
+          />
+        </Sequence>
       ) : null}
-      <SoundEffects data={data} />
+      {data.audio ? (
+        <Sequence from={narrationStartFrames}>
+          <Audio src={staticFile(data.audio)} />
+        </Sequence>
+      ) : null}
+      {data.backgroundAudio ? (
+        evidenceIntro ? (
+          <Audio
+            src={resolveAudioSrc(data.backgroundAudio)}
+            startFrom={Math.round((evidenceIntro.musicLeadInSeconds ?? 0) * fps)}
+            volume={(frame) => {
+              const intro = evidenceIntro.musicIntroVolume ?? 1.8;
+              const story = evidenceIntro.musicStoryVolume ?? intro * 0.8;
+              const fadeStart = Math.max(0, introFrames - fps);
+              const fadeEnd = introFrames + fps;
+              if (frame < fadeStart) return intro;
+              if (frame >= fadeEnd) return story;
+              const fadeProgress = interpolate(
+                frame,
+                [fadeStart, fadeEnd],
+                [0, 1],
+                {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'},
+              );
+              return interpolate(smooth(fadeProgress), [0, 1], [intro, story]);
+            }}
+            loop
+          />
+        ) : (
+          <Audio src={resolveAudioSrc(data.backgroundAudio)} volume={data.backgroundVolume ?? 0.065} loop />
+        )
+      ) : null}
+      <Sequence from={narrationStartFrames}>
+        <SoundEffects data={data} />
+      </Sequence>
       {data.scenes.map((scene) => {
-        const from = Math.floor(scene.start * fps);
-        const durationInFrames = Math.max(1, Math.ceil((scene.end - scene.start) * fps));
+        const isFirstScene = scene.index === firstSceneIndex;
+        const from =
+          introFrames +
+          Math.floor(scene.start * fps) +
+          (isFirstScene ? 0 : narrationDelayFrames);
+        const durationInFrames =
+          Math.max(1, Math.ceil((scene.end - scene.start) * fps)) +
+          (isFirstScene ? narrationDelayFrames : 0);
         return (
           <Sequence key={scene.index} from={from} durationInFrames={durationInFrames}>
             <ArchiveSceneFrame
@@ -96,12 +157,241 @@ export const ArchiveDocumentary = ({data}: {data: ArchiveData}) => {
               markerAllCaps={data.markerAllCaps !== false}
               subtitlesEnabled={data.subtitlesEnabled !== false}
               documentaryFilter={data.documentaryFilter ?? 'current_archival'}
+              showIntroPrintReveal={!evidenceIntro}
             />
           </Sequence>
         );
       })}
-      {data.subtitlesEnabled === false ? null : <Captions captions={data.captions ?? []} startAt={hookEnd} />}
+      {data.subtitlesEnabled === false ? null : (
+        <Sequence from={narrationStartFrames}>
+          <Captions captions={data.captions ?? []} startAt={hookEnd} />
+        </Sequence>
+      )}
     </AbsoluteFill>
+  );
+};
+
+type ScheduledIntroScene = {
+  scene: EvidenceIntroScene;
+  start: number;
+  duration: number;
+  cropPunch: boolean;
+  slideIn: boolean;
+};
+
+const evidenceSchedule = (
+  scenes: EvidenceIntroScene[],
+  durationInFrames: number,
+  fps: number,
+) => {
+  const whiteFrames = Math.max(1, Math.round(0.766667 * fps));
+  const contentFrames = Math.max(scenes.length, durationInFrames - whiteFrames);
+  const count = scenes.length;
+  const cropSlot = Math.max(3, Math.min(count - 4, Math.round(count * 0.34)));
+  const evidenceSlot = Math.max(cropSlot + 2, Math.min(count - 2, Math.round(count * 0.52)));
+  const slideSlot = evidenceSlot + 1;
+  const minFrames = scenes.map((_, index) => {
+    const slot = index + 1;
+    if (slot === cropSlot) return Math.round(1.3 * fps);
+    if (slot === slideSlot) return Math.round(0.78 * fps);
+    if (slot === 1) return Math.round(0.65 * fps);
+    return Math.round(0.55 * fps);
+  });
+  const remaining = Math.max(0, contentFrames - minFrames.reduce((sum, value) => sum + value, 0));
+  const weights = scenes.map((scene, index) => {
+    const slot = index + 1;
+    if (slot === cropSlot || slot === slideSlot) return 0.65;
+    if (scene.role === 'evidence') return 1.18;
+    if (slot === 1) return 1.12;
+    return 1;
+  });
+  const weightTotal = weights.reduce((sum, value) => sum + value, 0);
+  const durations = minFrames.map((minimum, index) =>
+    minimum + Math.floor((remaining * weights[index]) / weightTotal),
+  );
+  let undistributed = contentFrames - durations.reduce((sum, value) => sum + value, 0);
+  for (let index = 0; undistributed > 0; index = (index + 1) % durations.length) {
+    durations[index] += 1;
+    undistributed -= 1;
+  }
+  let start = 0;
+  const scheduled: ScheduledIntroScene[] = scenes.map((scene, index) => {
+    const slot = index + 1;
+    const item = {
+      scene,
+      start,
+      duration: durations[index],
+      cropPunch: slot === cropSlot,
+      slideIn: slot === slideSlot,
+    };
+    start += durations[index];
+    return item;
+  });
+  return {scheduled, contentFrames};
+};
+
+const EvidenceMontage = ({
+  scenes,
+  durationInFrames,
+  sfx,
+}: {
+  scenes: EvidenceIntroScene[];
+  durationInFrames: number;
+  sfx?: ArchiveData['sfx'];
+}) => {
+  const {fps} = useVideoConfig();
+  const {scheduled, contentFrames} = evidenceSchedule(scenes, durationInFrames, fps);
+  return (
+    <AbsoluteFill style={styles.evidenceIntroStage}>
+      {scheduled.map((item) => (
+        <Sequence
+          key={`intro-${item.scene.slot}`}
+          from={item.start}
+          durationInFrames={item.duration}
+        >
+          <EvidenceIntroFrame item={item} />
+        </Sequence>
+      ))}
+      <Sequence from={contentFrames} durationInFrames={durationInFrames - contentFrames}>
+        <AbsoluteFill style={styles.introWhiteFlash} />
+      </Sequence>
+      <EvidenceIntroSounds scheduled={scheduled} contentFrames={contentFrames} sfx={sfx} />
+    </AbsoluteFill>
+  );
+};
+
+const EvidenceIntroFrame = ({item}: {item: ScheduledIntroScene}) => {
+  const frame = useCurrentFrame();
+  const {fps} = useVideoConfig();
+  const progress = frame / Math.max(1, item.duration - 1);
+  const eased = smooth(progress);
+  const cropFrame = Math.round(item.duration * 0.46);
+  const baseZoom = 1 + eased * (item.scene.slot % 3 === 0 ? 0.025 : 0.016);
+  const cropZoom = item.cropPunch
+    ? frame < cropFrame
+      ? baseZoom
+      : item.scene.cropScale ?? 1.48
+    : baseZoom;
+  const horizontalDrift = item.cropPunch
+    ? 0
+    : item.scene.slot % 4 === 0
+      ? -10 * eased
+      : item.scene.slot % 4 === 2
+        ? 9 * eased
+        : 0;
+  const slideFrames = Math.max(1, Math.round(0.15 * fps));
+  const slideProgress = interpolate(frame, [0, slideFrames], [0, 1], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
+  const slideX = item.slideIn ? (1 - smooth(slideProgress)) * 100 : 0;
+  const blur = item.slideIn
+    ? interpolate(slideProgress, [0, 1], [10, 0], {
+        extrapolateLeft: 'clamp',
+        extrapolateRight: 'clamp',
+      })
+    : item.cropPunch && frame === cropFrame
+      ? 8
+      : 0;
+  const firstFade =
+    item.scene.slot === 1
+      ? interpolate(frame, [0, Math.round(0.2 * fps)], [0, 1], {
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+        })
+      : 1;
+  const transform = `translateX(${slideX + horizontalDrift}px) scale(${cropZoom})`;
+  const cropOrigin =
+    item.cropPunch && frame >= cropFrame
+      ? `${item.scene.cropFocusX ?? 50}% ${item.scene.cropFocusY ?? 50}%`
+      : 'center center';
+  return (
+    <AbsoluteFill
+      style={{
+        ...styles.evidenceIntroScene,
+        backgroundColor:
+          item.scene.slot === 1 || item.slideIn ? '#eee8d8' : '#080706',
+      }}
+    >
+      <Img
+        src={staticFile(item.scene.image)}
+        style={{
+          ...styles.evidenceIntroImage,
+          transform,
+          filter: `blur(${blur}px)`,
+          opacity: firstFade,
+          transformOrigin: cropOrigin,
+        }}
+      />
+      <div style={styles.evidenceSoftEdgeWrap}>
+        <Img
+          src={staticFile(item.scene.image)}
+          style={{
+            ...styles.evidenceIntroImage,
+            transform,
+            filter: `blur(${blur + 8}px)`,
+            opacity: firstFade,
+            transformOrigin: cropOrigin,
+          }}
+        />
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+const EvidenceIntroSounds = ({
+  scheduled,
+  contentFrames,
+  sfx,
+}: {
+  scheduled: ScheduledIntroScene[];
+  contentFrames: number;
+  sfx?: ArchiveData['sfx'];
+}) => {
+  const {fps} = useVideoConfig();
+  const camera = sfx?.introCameraSwitch;
+  const paper = sfx?.paperSlide;
+  const snap = sfx?.introFinalSnap;
+  return (
+    <>
+      {camera ? (
+        <Sequence from={Math.round(0.12 * fps)} durationInFrames={Math.round(0.5 * fps)}>
+          <Audio src={resolveAudioSrc(camera)} volume={0.44} />
+        </Sequence>
+      ) : null}
+      {scheduled.slice(1).map((item) => {
+        const file = item.slideIn ? paper : camera;
+        if (!file) return null;
+        const paperLead = item.slideIn ? Math.round(0.046 * fps) : 0;
+        return (
+          <Sequence
+            key={`intro-sound-${item.scene.slot}`}
+            from={Math.max(0, item.start - paperLead)}
+            durationInFrames={Math.round(0.55 * fps)}
+          >
+            <Audio src={resolveAudioSrc(file)} volume={item.slideIn ? 0.74 : 0.56} />
+          </Sequence>
+        );
+      })}
+      {scheduled
+        .filter((item) => item.cropPunch)
+        .map((item) =>
+          paper ? (
+            <Sequence
+              key={`intro-crop-${item.scene.slot}`}
+              from={Math.max(0, item.start + Math.round(item.duration * 0.55) - Math.round(0.046 * fps))}
+              durationInFrames={Math.round(0.55 * fps)}
+            >
+              <Audio src={resolveAudioSrc(paper)} volume={0.68} />
+            </Sequence>
+          ) : null,
+        )}
+      {snap ? (
+        <Sequence from={contentFrames} durationInFrames={Math.round(0.5 * fps)}>
+          <Audio src={resolveAudioSrc(snap)} volume={1.08} />
+        </Sequence>
+      ) : null}
+    </>
   );
 };
 
@@ -154,6 +444,7 @@ const ArchiveSceneFrame = ({
   markerAllCaps,
   subtitlesEnabled,
   documentaryFilter,
+  showIntroPrintReveal,
 }: {
   scene: ArchiveScene;
   durationInFrames: number;
@@ -162,6 +453,7 @@ const ArchiveSceneFrame = ({
   markerAllCaps: boolean;
   subtitlesEnabled: boolean;
   documentaryFilter: NonNullable<ArchiveData['documentaryFilter']>;
+  showIntroPrintReveal: boolean;
 }) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
@@ -169,15 +461,22 @@ const ArchiveSceneFrame = ({
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   });
-  const fade = Math.min(
-    interpolate(frame, [0, fps * 0.55], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'}),
-    interpolate(frame, [durationInFrames - fps * 0.7, durationInFrames], [1, 0], {
-      extrapolateLeft: 'clamp',
-      extrapolateRight: 'clamp',
-    }),
-  );
+  const fadeOut = interpolate(frame, [durationInFrames - fps * 0.7, durationInFrames], [1, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
+  const fade =
+    scene.index === 1 && !showIntroPrintReveal
+      ? fadeOut
+      : Math.min(
+          interpolate(frame, [0, fps * 0.55], [0, 1], {
+            extrapolateLeft: 'clamp',
+            extrapolateRight: 'clamp',
+          }),
+          fadeOut,
+        );
   const transform = imageTransform(scene, progress);
-  const focusBlur = scene.index === 1
+  const focusBlur = scene.index === 1 && showIntroPrintReveal
     ? interpolate(frame, [0, 14, 42], [8, 2.5, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})
     : 0;
 
@@ -207,6 +506,9 @@ const ArchiveSceneFrame = ({
           }}
         />
       </AbsoluteFill>
+
+      <AbsoluteFill style={styles.softGrade} />
+      <AbsoluteFill style={styles.vignette} />
       {documentaryFilter === 'soft_edge_lens' ? (
         <>
           <AbsoluteFill style={styles.softEdgeChromaticWrap}>
@@ -222,13 +524,10 @@ const ArchiveSceneFrame = ({
           <AbsoluteFill style={styles.softEdgeLens} />
         </>
       ) : null}
-
-      <AbsoluteFill style={styles.softGrade} />
-      <AbsoluteFill style={styles.vignette} />
       <FilmDamage frame={frame} scene={scene} />
       <MomentAccent scene={scene} frame={frame} durationInFrames={durationInFrames} />
       <MarkerOverlay scene={scene} frame={frame} durationInFrames={durationInFrames} textStyle={markerTextStyle} markerFont={markerFont} markerAllCaps={markerAllCaps} subtitlesEnabled={subtitlesEnabled} />
-      {scene.index === 1 ? <IntroPrintReveal frame={frame} /> : null}
+      {scene.index === 1 && showIntroPrintReveal ? <IntroPrintReveal frame={frame} /> : null}
     </AbsoluteFill>
   );
 };
@@ -770,6 +1069,32 @@ const styles: Record<string, CSSProperties> = {
     backgroundColor: '#080706',
     color: '#f2eadc',
     fontFamily: `Georgia, Times New Roman, ${MULTILINGUAL_FALLBACK_STACK}`,
+  },
+  evidenceIntroStage: {
+    backgroundColor: '#080706',
+    overflow: 'hidden',
+  },
+  evidenceIntroScene: {
+    overflow: 'hidden',
+  },
+  evidenceIntroImage: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    transformOrigin: 'center center',
+  },
+  evidenceSoftEdgeWrap: {
+    position: 'absolute',
+    inset: 0,
+    overflow: 'hidden',
+    pointerEvents: 'none',
+    WebkitMaskImage:
+      'linear-gradient(90deg, black 0%, rgba(0,0,0,0.72) 8%, transparent 27%, transparent 73%, rgba(0,0,0,0.72) 92%, black 100%)',
+    maskImage:
+      'linear-gradient(90deg, black 0%, rgba(0,0,0,0.72) 8%, transparent 27%, transparent 73%, rgba(0,0,0,0.72) 92%, black 100%)',
+  },
+  introWhiteFlash: {
+    backgroundColor: 'white',
   },
   empty: {
     backgroundColor: '#0c0a08',
