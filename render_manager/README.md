@@ -16,15 +16,16 @@ python3 render_manager/render_manager.py
 - Lets you drag and drop `.zip` packages using the drag/drop component bundled with the app; no separate installation is needed.
 - Gives every row a clickable Selected checkbox. Uncheck a row to leave it out of publishing, removal, copying, or downloading actions.
 - Assigns checked waiting zips unique release tags from `v1` to `v10`.
-- Treats Total workers as one budget and divides it evenly across the checked waiting jobs.
-- Removes local queue rows using their checked Publish boxes.
-- Clears renderer releases `v1` to `v10`, workflow jobs, and their attached artifacts with one **Clear all** action.
+- Treats Total workers as one budget and divides it evenly when ZIPs are added or the queue selection/budget changes. Bulk launch preserves the worker values currently shown in each row.
+- Removes local queue rows immediately using their checked Selected boxes.
+- Detects which renderer releases currently exist, then clears only those releases plus the workflow jobs and attached artifacts with one **Clear all** action.
 - Uploads all selected release zips concurrently, then dispatches all of their `.github/workflows/render-release.yml` jobs.
 - Saves each GitHub run ID immediately. You can close the app, reopen it later, and use **Refresh jobs** to update every submitted row and discover finished artifacts.
 - Copies the download link for the single highlighted completed row.
 - Downloads all checked completed rows in bulk.
 - Opens checked artifact downloads in Brave one at a time so its Neat Download Manager extension can intercept every link.
 - Downloads checked completed jobs to a persistent chosen folder, extracts their MP4 files, and deletes the downloaded artifact ZIP files automatically.
+- Uses the Progress log for completion and error messages; the destructive **Clear all** confirmation is the only informational confirmation popup.
 
 ## Token
 

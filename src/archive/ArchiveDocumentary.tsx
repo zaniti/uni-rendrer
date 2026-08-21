@@ -4,6 +4,7 @@ import {
   continueRender,
   delayRender,
   Img,
+  OffthreadVideo,
   Sequence,
   interpolate,
   spring,
@@ -263,22 +264,12 @@ const EvidenceMontage = ({
 const EvidenceIntroFrame = ({item}: {item: ScheduledIntroScene}) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
-  const progress = frame / Math.max(1, item.duration - 1);
-  const eased = smooth(progress);
   const cropFrame = Math.round(item.duration * 0.46);
-  const baseZoom = 1 + eased * (item.scene.slot % 3 === 0 ? 0.025 : 0.016);
   const cropZoom = item.cropPunch
     ? frame < cropFrame
-      ? baseZoom
+      ? 1
       : item.scene.cropScale ?? 1.48
-    : baseZoom;
-  const horizontalDrift = item.cropPunch
-    ? 0
-    : item.scene.slot % 4 === 0
-      ? -10 * eased
-      : item.scene.slot % 4 === 2
-        ? 9 * eased
-        : 0;
+    : 1;
   const slideFrames = Math.max(1, Math.round(0.15 * fps));
   const slideProgress = interpolate(frame, [0, slideFrames], [0, 1], {
     extrapolateLeft: 'clamp',
@@ -300,7 +291,7 @@ const EvidenceIntroFrame = ({item}: {item: ScheduledIntroScene}) => {
           extrapolateRight: 'clamp',
         })
       : 1;
-  const transform = `translateX(${slideX + horizontalDrift}px) scale(${cropZoom})`;
+  const transform = `translateX(${slideX}px) scale(${cropZoom})`;
   const cropOrigin =
     item.cropPunch && frame >= cropFrame
       ? `${item.scene.cropFocusX ?? 50}% ${item.scene.cropFocusY ?? 50}%`
@@ -479,6 +470,13 @@ const ArchiveSceneFrame = ({
   const focusBlur = scene.index === 1 && showIntroPrintReveal
     ? interpolate(frame, [0, 14, 42], [8, 2.5, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})
     : 0;
+  const videoFrames = scene.video
+    ? Math.min(
+        durationInFrames,
+        Math.max(1, Math.round((scene.videoDurationSeconds ?? 5) * fps)),
+      )
+    : 0;
+  const showVideo = Boolean(scene.video) && frame < videoFrames;
 
   if (scene.hook) {
     return <HookSceneFrame scene={scene} durationInFrames={durationInFrames} />;
@@ -497,14 +495,26 @@ const ArchiveSceneFrame = ({
         />
       </AbsoluteFill>
       <AbsoluteFill style={styles.imageWrap}>
-        <Img
-          src={staticFile(scene.image)}
-          style={{
-            ...styles.image,
-            transform,
-            filter: `${imageFilter(scene)} blur(${focusBlur}px)`,
-          }}
-        />
+        {showVideo && scene.video ? (
+          <OffthreadVideo
+            muted
+            src={staticFile(scene.video)}
+            style={{
+              ...styles.image,
+              transform: 'none',
+              filter: imageFilter(scene),
+            }}
+          />
+        ) : (
+          <Img
+            src={staticFile(scene.image)}
+            style={{
+              ...styles.image,
+              transform,
+              filter: `${imageFilter(scene)} blur(${focusBlur}px)`,
+            }}
+          />
+        )}
       </AbsoluteFill>
 
       <AbsoluteFill style={styles.softGrade} />

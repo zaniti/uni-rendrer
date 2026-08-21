@@ -355,21 +355,46 @@ class GitHubClient:
     def delete_release(self, release_id: int) -> None:
         self.request_json("DELETE", self.repo_path(f"/releases/{release_id}"), expected=(204,))
 
+    def all_releases(self) -> list[dict[str, Any]]:
+        releases: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            data = self.request_json(
+                "GET",
+                self.repo_path(f"/releases?per_page=100&page={page}"),
+                expected=(200,),
+            )
+            batch = list(data or [])
+            releases.extend(batch)
+            if len(batch) < 100:
+                return releases
+            page += 1
+
+    def existing_releases(self, tags: list[str]) -> dict[str, dict[str, Any]]:
+        allowed = set(tags)
+        return {
+            str(release.get("tag_name")): release
+            for release in self.all_releases()
+            if str(release.get("tag_name")) in allowed
+        }
+
     def list_release_assets(self, release_id: int) -> list[dict[str, Any]]:
         return self.request_json("GET", self.repo_path(f"/releases/{release_id}/assets?per_page=100"), expected=(200,))
 
     def delete_asset(self, asset_id: int) -> None:
         self.request_json("DELETE", self.repo_path(f"/releases/assets/{asset_id}"), expected=(204,))
 
-    def clear_releases(self, tags: list[str], log) -> None:
-        for tag in tags:
-            release = self.release_by_tag(tag)
+    def clear_releases(self, releases: dict[str, dict[str, Any]], log) -> list[str]:
+        cleared: list[str] = []
+        for tag in RELEASE_TAGS:
+            release = releases.get(tag)
             if not release:
-                log(f"{tag}: no release found.")
                 continue
             log(f"{tag}: deleting release and its assets...")
             self.delete_release(int(release["id"]))
             log(f"{tag}: cleared.")
+            cleared.append(tag)
+        return cleared
 
     def replace_zip_asset(self, tag: str, branch: str, zip_path: Path, log) -> None:
         release = self.ensure_release(tag, branch)
@@ -907,10 +932,10 @@ class RenderQueueApp(RenderQueueBase):
                     self.show_login("GitHub token expired or was rejected. Enter a new token to continue.")
                 elif kind == "message":
                     title, msg = payload
-                    messagebox.showinfo(title, msg)
+                    self.log(f"{title}: {msg}")
                 elif kind == "error":
                     title, msg = payload
-                    messagebox.showerror(title, msg)
+                    self.log(f"{title}: {msg}")
         except queue.Empty:
             pass
         self.after(120, self.drain_events)
@@ -941,7 +966,7 @@ class RenderQueueApp(RenderQueueBase):
             if exc.status == 401 and interactive:
                 if self.show_login("GitHub token expired or invalid. Enter a new token."):
                     return self.ensure_client(interactive=False)
-            messagebox.showerror("GitHub login failed", str(exc))
+            self.log(f"GitHub login failed: {exc}")
             return None
         self.client = client
         return client
@@ -1016,12 +1041,11 @@ class RenderQueueApp(RenderQueueBase):
     def remove_selected(self) -> None:
         selected = {job.id for job in self.jobs if job.enabled}
         if not selected:
-            messagebox.showinfo("Nothing selected", "Check the Publish box for the rows you want to remove.")
-            return
-        if not messagebox.askyesno("Remove selected", f"Remove {len(selected)} checked row(s) from the local queue?"):
+            self.log("Nothing selected. Check the Selected box for the rows you want to remove.")
             return
         self.jobs = [job for job in self.jobs if job.id not in selected]
         self.redistribute_workers()
+        self.log(f"Removed {len(selected)} selected row(s) from the local queue.")
 
     def auto_assign(self) -> None:
         targets = self.selected_jobs() or self.pending_enabled_jobs()
@@ -1058,9 +1082,20 @@ class RenderQueueApp(RenderQueueBase):
         client = self.ensure_client()
         if not client:
             return
+        try:
+            existing_releases = client.existing_releases(RELEASE_TAGS)
+        except Exception as exc:
+            self.log(f"Could not inspect renderer releases: {exc}")
+            return
+        existing_tags = [tag for tag in RELEASE_TAGS if tag in existing_releases]
+        release_description = (
+            ", ".join(existing_tags)
+            if existing_tags
+            else "none (no renderer releases are currently uploaded)"
+        )
         msg = (
-            f"This will permanently delete all Render Release Zips workflow jobs, their artifacts, "
-            f"and renderer releases {', '.join(RELEASE_TAGS)} in {self.settings.owner}/{self.settings.repo}.\n\n"
+            "This will permanently delete all Render Release Zips workflow jobs and their artifacts.\n\n"
+            f"Existing renderer releases that will be deleted: {release_description}\n\n"
             "It does not delete your local ZIP files or rows from this app. Continue?"
         )
         if not messagebox.askyesno("Clear all renderer data", msg):
@@ -1070,8 +1105,12 @@ class RenderQueueApp(RenderQueueBase):
         def worker() -> None:
             try:
                 count = client.clear_workflow_runs(self.settings.workflow_file, self.event_log)
-                client.clear_releases(RELEASE_TAGS, self.event_log)
-                self.ui_events.put(("message", ("Renderer data cleared", f"Deleted {count} workflow job(s), their artifacts, and releases v1-v10.")))
+                cleared_tags = client.clear_releases(existing_releases, self.event_log)
+                release_summary = ", ".join(cleared_tags) if cleared_tags else "no releases"
+                self.event_log(
+                    f"Clear all finished: deleted {count} workflow job(s), their artifacts, "
+                    f"and {release_summary}."
+                )
             except GitHubError as exc:
                 if exc.status == 401:
                     self.ui_events.put(("auth_failed", None))
@@ -1090,25 +1129,23 @@ class RenderQueueApp(RenderQueueBase):
             return
         targets = self.pending_enabled_jobs()
         if not targets:
-            messagebox.showinfo("Nothing to render", "Check at least one waiting or failed row to render.")
+            self.log("Nothing to render. Check at least one waiting or failed row.")
             return
         if len(targets) > len(RELEASE_TAGS):
-            messagebox.showerror("Too many jobs", f"At most {len(RELEASE_TAGS)} jobs can launch in one batch.")
+            self.log(f"Too many jobs. At most {len(RELEASE_TAGS)} jobs can launch in one batch.")
             return
         releases = [job.release_tag for job in targets]
         duplicate_releases = sorted({release for release in releases if releases.count(release) > 1})
         if duplicate_releases:
-            messagebox.showerror(
-                "Duplicate releases",
+            self.log(
                 "Each checked job needs a different release slot before bulk launch.\n\n"
                 f"Used more than once: {', '.join(duplicate_releases)}",
             )
             return
         missing = [job.zip_path for job in targets if not Path(job.zip_path).exists()]
         if missing:
-            messagebox.showerror("Missing zip file", f"This file is missing:\n{missing[0]}")
+            self.log(f"Missing zip file: {missing[0]}")
             return
-        self.redistribute_workers(refresh=False)
         for job in targets:
             job.run_id = ""
             job.run_url = ""
@@ -1121,7 +1158,7 @@ class RenderQueueApp(RenderQueueBase):
         self.refresh_table()
         self.set_busy(True)
         allocation = ", ".join(f"{job.zip_name}: {job.workers}" for job in targets)
-        self.log(f"Submitting {len(targets)} checked jobs together. Worker split — {allocation}.")
+        self.log(f"Submitting {len(targets)} checked jobs together. Workers — {allocation}.")
         self.worker = threading.Thread(target=self.bulk_worker, args=(client, targets), daemon=True)
         self.worker.start()
 
@@ -1234,7 +1271,7 @@ class RenderQueueApp(RenderQueueBase):
             return
         targets = [job for job in self.jobs if job.run_id or job.status.startswith("submitted")]
         if not targets:
-            messagebox.showinfo("No submitted jobs", "There are no submitted GitHub jobs to refresh yet.")
+            self.log("There are no submitted GitHub jobs to refresh yet.")
             return
         self.set_busy(True)
         self.log(f"Refreshing {len(targets)} submitted job(s) from GitHub...")
@@ -1310,7 +1347,7 @@ class RenderQueueApp(RenderQueueBase):
     def copy_download_link(self) -> None:
         job = self.first_selected_job()
         if not job or not job.artifact_web_url:
-            messagebox.showinfo("No download yet", "Highlight one completed row with a download-ready artifact.")
+            self.log("No download ready. Highlight one completed row first.")
             return
         self.clipboard_clear()
         self.clipboard_append(job.artifact_web_url)
@@ -1321,11 +1358,11 @@ class RenderQueueApp(RenderQueueBase):
             return
         jobs = [job for job in self.jobs if job.enabled and job.artifact_web_url]
         if not jobs:
-            messagebox.showinfo("No download yet", "Check one or more completed jobs with download-ready artifacts.")
+            self.log("No download ready. Check one or more completed jobs first.")
             return
         brave_locations = [Path("/Applications/Brave Browser.app"), Path.home() / "Applications/Brave Browser.app"]
         if sys.platform != "darwin" or not any(path.exists() for path in brave_locations):
-            messagebox.showerror("Brave not found", "Brave Browser was not found in Applications.")
+            self.log("Brave Browser was not found in Applications.")
             return
         self.neat_opening = True
         self.neat_download_queue = list(jobs)
@@ -1337,10 +1374,9 @@ class RenderQueueApp(RenderQueueBase):
         if not self.neat_download_queue:
             self.neat_opening = False
             self.neat_button.configure(state="normal")
-            messagebox.showinfo(
-                "Opened in Brave",
+            self.log(
                 "Each checked artifact was opened separately in Brave. "
-                "The Neat Download Manager extension should list every download.",
+                "Neat Download Manager should list every download."
             )
             return
         job = self.neat_download_queue.pop(0)
@@ -1356,13 +1392,16 @@ class RenderQueueApp(RenderQueueBase):
             self.neat_opening = False
             self.neat_download_queue = []
             self.neat_button.configure(state="normal")
-            messagebox.showerror("Could not open Brave", str(exc))
+            self.log(f"Could not open Brave: {exc}")
             return
         if result.returncode != 0:
             self.neat_opening = False
             self.neat_download_queue = []
             self.neat_button.configure(state="normal")
-            messagebox.showerror("Could not open Brave", result.stderr.strip() or "Brave Browser could not be opened.")
+            self.log(
+                "Could not open Brave: "
+                + (result.stderr.strip() or "Brave Browser could not be opened.")
+            )
             return
         self.log(f"Sent to Brave/Neat: {job.zip_name}")
         self.after(3000, self.open_next_neat_download)
@@ -1384,7 +1423,7 @@ class RenderQueueApp(RenderQueueBase):
     def download_selected(self) -> None:
         jobs = [job for job in self.jobs if job.enabled and job.artifact_id]
         if not jobs:
-            messagebox.showinfo("No download yet", "Check one or more completed jobs with download-ready artifacts.")
+            self.log("No download ready. Check one or more completed jobs first.")
             return
         client = self.ensure_client()
         if not client:
