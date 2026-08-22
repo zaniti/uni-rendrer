@@ -26,6 +26,8 @@ export type ArchiveScene = {
   image: string;
   video?: string;
   videoDurationSeconds?: number;
+  videoLeadInSeconds?: number;
+  videoContinuationImage?: string;
   start: number;
   end: number;
   mode: ArchiveMode;
