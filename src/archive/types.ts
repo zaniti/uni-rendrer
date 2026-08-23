@@ -24,10 +24,6 @@ export type ArchiveScene = {
   text: string;
   prompt: string;
   image: string;
-  video?: string;
-  videoDurationSeconds?: number;
-  videoLeadInSeconds?: number;
-  videoContinuationImage?: string;
   start: number;
   end: number;
   mode: ArchiveMode;
@@ -79,8 +75,6 @@ export type ArchiveData = {
   markerTextStyle?: 'small_red_note' | 'harsh_black';
   markerFont?: 'homemade_apple' | 'reenie_beanie';
   markerAllCaps?: boolean;
-  seedanceEnabled?: boolean;
-  seedanceModel?: string;
   documentaryFilter?: 'current_archival' | 'soft_edge_lens';
   contentLanguage?: 'english' | 'spanish';
   backgroundAudio?: string;

@@ -4,7 +4,6 @@ import {
   continueRender,
   delayRender,
   Img,
-  OffthreadVideo,
   Sequence,
   interpolate,
   spring,
@@ -470,25 +469,6 @@ const ArchiveSceneFrame = ({
   const focusBlur = scene.index === 1 && showIntroPrintReveal
     ? interpolate(frame, [0, 14, 42], [8, 2.5, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})
     : 0;
-  const videoLeadInFrames = scene.video
-    ? Math.min(
-        Math.max(0, durationInFrames - 1),
-        Math.max(0, Math.round((scene.videoLeadInSeconds ?? 0) * fps)),
-      )
-    : 0;
-  const videoFrames = scene.video
-    ? Math.min(
-        Math.max(0, durationInFrames - videoLeadInFrames),
-        Math.max(1, Math.round((scene.videoDurationSeconds ?? 5) * fps)),
-      )
-    : 0;
-  const showVideo = Boolean(scene.video)
-    && frame >= videoLeadInFrames
-    && frame < videoLeadInFrames + videoFrames;
-  const stillImage = frame >= videoLeadInFrames + videoFrames
-    ? scene.videoContinuationImage ?? scene.image
-    : scene.image;
-
   if (scene.hook) {
     return <HookSceneFrame scene={scene} durationInFrames={durationInFrames} />;
   }
@@ -506,28 +486,14 @@ const ArchiveSceneFrame = ({
         />
       </AbsoluteFill>
       <AbsoluteFill style={styles.imageWrap}>
-        {showVideo && scene.video ? (
-          <Sequence from={videoLeadInFrames} layout="none">
-            <OffthreadVideo
-              muted
-              src={staticFile(scene.video)}
-              style={{
-                ...styles.image,
-                transform: 'none',
-                filter: imageFilter(scene),
-              }}
-            />
-          </Sequence>
-        ) : (
-          <Img
-            src={staticFile(stillImage)}
-            style={{
-              ...styles.image,
-              transform,
-              filter: `${imageFilter(scene)} blur(${focusBlur}px)`,
-            }}
-          />
-        )}
+        <Img
+          src={staticFile(scene.image)}
+          style={{
+            ...styles.image,
+            transform,
+            filter: `${imageFilter(scene)} blur(${focusBlur}px)`,
+          }}
+        />
       </AbsoluteFill>
 
       <AbsoluteFill style={styles.softGrade} />
