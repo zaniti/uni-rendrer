@@ -21,7 +21,6 @@ import type {
 } from './types';
 
 const MARKER_FONT_FAMILIES = {
-  homemade_apple: 'ArchiveMarkerHomemadeApple',
   reenie_beanie: 'ArchiveMarkerReenieBeanie',
 } as const;
 const MULTILINGUAL_FALLBACK_FONT = 'ArchiveNotoSansCJK';
@@ -33,10 +32,6 @@ const useArchiveMarkerFonts = () => {
   useEffect(() => {
     let cancelled = false;
     const fonts = [
-      new FontFace(
-        MARKER_FONT_FAMILIES.homemade_apple,
-        `url(${staticFile('fonts/HomemadeApple-Regular.ttf')}) format('truetype')`,
-      ),
       new FontFace(
         MARKER_FONT_FAMILIES.reenie_beanie,
         `url(${staticFile('fonts/ReenieBeanie-Regular.ttf')}) format('truetype')`,
@@ -152,8 +147,8 @@ export const ArchiveDocumentary = ({data}: {data: ArchiveData}) => {
             <ArchiveSceneFrame
               scene={scene}
               durationInFrames={durationInFrames}
-              markerTextStyle={data.markerTextStyle ?? 'small_red_note'}
-              markerFont={data.markerFont ?? 'homemade_apple'}
+              markerTextStyle={data.markerTextStyle ?? 'parchment_swipe'}
+              markerFont={data.markerFont ?? 'reenie_beanie'}
               markerAllCaps={data.markerAllCaps !== false}
               subtitlesEnabled={data.subtitlesEnabled !== false}
               documentaryFilter={data.documentaryFilter ?? 'current_archival'}
@@ -1041,8 +1036,13 @@ const MarkerOverlay = ({
   };
 
   const textOpacity = interpolate(frame, [12, 28], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
+  const backdropProgress = interpolate(frame, [8, 22], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
   const textJitterX = roughJitter(sceneSeed + 701, 1.25);
   const textJitterY = roughJitter(sceneSeed + 907, 1.0);
+  const isOchreHighlight = textStyle === 'ochre_highlight';
+  const selectedMarkerFont =
+    MARKER_FONT_FAMILIES[markerFont as keyof typeof MARKER_FONT_FAMILIES] ??
+    MARKER_FONT_FAMILIES.reenie_beanie;
 
   return (
     <AbsoluteFill style={{...styles.markerLayer, opacity}}>
@@ -1052,8 +1052,9 @@ const MarkerOverlay = ({
       {text ? (
         <div
           style={{
-            ...(textStyle === 'harsh_black' ? styles.markerTextHarshBlack : styles.markerTextSmallRed),
-            fontFamily: `${MARKER_FONT_FAMILIES[markerFont]}, ${MULTILINGUAL_FALLBACK_STACK}`,
+            ...styles.markerTextBase,
+            ...(isOchreHighlight ? styles.markerTextOchreHighlight : styles.markerTextParchmentSwipe),
+            fontFamily: `${selectedMarkerFont}, ${MULTILINGUAL_FALLBACK_STACK}`,
             textTransform: markerAllCaps ? 'uppercase' : 'lowercase',
             left: textPos.x,
             top: textPos.y,
@@ -1061,7 +1062,13 @@ const MarkerOverlay = ({
             transform: `translate(${textJitterX}px, ${textJitterY}px)`,
           }}
         >
-          {text}
+          <div
+            style={{
+              ...(isOchreHighlight ? styles.markerOchreBrush : styles.markerParchmentStrip),
+              transform: `scaleX(${backdropProgress})`,
+            }}
+          />
+          <span style={styles.markerTextContent}>{text}</span>
         </div>
       ) : null}
     </AbsoluteFill>
@@ -1255,25 +1262,49 @@ const styles: Record<string, CSSProperties> = {
     inset: 0,
     overflow: 'visible',
   },
-  markerTextSmallRed: {
+  markerTextBase: {
     position: 'absolute',
-    color: 'rgba(187,0,0,0.58)',
-    fontSize: 58,
-    fontWeight: 500,
-    letterSpacing: 1.2,
-    lineHeight: 1,
-    mixBlendMode: 'multiply',
-    filter: 'blur(0.2px)',
-  },
-  markerTextHarshBlack: {
-    position: 'absolute',
-    color: 'rgba(17,14,12,0.74)',
     fontSize: 66,
     fontWeight: 700,
-    letterSpacing: 1,
+    letterSpacing: 1.2,
     lineHeight: 1,
-    mixBlendMode: 'multiply',
+    whiteSpace: 'nowrap',
+    isolation: 'isolate',
+  },
+  markerTextParchmentSwipe: {
+    color: '#861010',
+    padding: '7px 31px 12px',
+  },
+  markerTextOchreHighlight: {
+    color: '#28150a',
+    padding: '3px 22px 7px',
+  },
+  markerTextContent: {
+    position: 'relative',
+    zIndex: 1,
+  },
+  markerParchmentStrip: {
+    position: 'absolute',
+    zIndex: 0,
+    inset: '-2px -18px -4px',
+    background: 'rgba(241,222,176,0.88)',
+    border: '1px solid rgba(99,65,29,0.34)',
+    boxShadow: '0 3px 10px rgba(0,0,0,0.32)',
+    clipPath: 'polygon(2% 5%, 99% 0, 97% 94%, 0 100%)',
+    transformOrigin: 'left center',
+  },
+  markerOchreBrush: {
+    position: 'absolute',
+    zIndex: 0,
+    left: -9,
+    right: -9,
+    top: 18,
+    height: 48,
+    background:
+      'linear-gradient(90deg, rgba(211,158,26,0), rgba(226,177,39,0.87) 8%, rgba(233,187,49,0.9) 91%, rgba(211,158,26,0))',
+    clipPath: 'polygon(1% 17%, 100% 2%, 97% 83%, 4% 100%)',
     filter: 'blur(0.35px)',
+    transformOrigin: 'left center',
   },
   scanAccent: {
     position: 'absolute',

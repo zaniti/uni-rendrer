@@ -75,8 +75,8 @@ export type ArchiveData = {
   audio: string;
   subtitlesEnabled?: boolean;
   markerOverlaysEnabled?: boolean;
-  markerTextStyle?: 'small_red_note' | 'harsh_black';
-  markerFont?: 'homemade_apple' | 'reenie_beanie';
+  markerTextStyle?: 'parchment_swipe' | 'ochre_highlight';
+  markerFont?: 'reenie_beanie';
   markerAllCaps?: boolean;
   documentaryFilter?: 'current_archival' | 'soft_edge_lens';
   contentLanguage?: 'english' | 'spanish';
