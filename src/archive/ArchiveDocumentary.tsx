@@ -758,6 +758,37 @@ const labelBoxToPixels = (box?: {x: number; y: number; w: number; h: number}) =>
   return {x1, y1, x2, y2, cx: (x1 + x2) / 2, cy: (y1 + y2) / 2};
 };
 
+const measureAxisForMarker = (marker: NonNullable<ArchiveScene['marker']>) => {
+  if (marker.measure_axis && marker.measure_axis !== 'auto') return marker.measure_axis;
+  const clue = `${marker.text ?? ''} ${marker.target ?? ''} ${marker.why ?? ''}`.toLowerCase();
+  if (/\b(height|high|tall|vertical|rising|rise|depth|deep|altura|alto|vertical|sube|elevaci[oó]n|profundidad)\b/.test(clue)) {
+    return 'vertical' as const;
+  }
+  if (/\b(width|wide|horizontal|span|across|ancho|anchura|horizontal|de lado a lado)\b/.test(clue)) {
+    return 'horizontal' as const;
+  }
+  return 'horizontal' as const;
+};
+
+const measurePointsForMarker = (marker: NonNullable<ArchiveScene['marker']>, box: ReturnType<typeof toPixelBox>) => {
+  const hasVisionPoints =
+    marker.measure_from &&
+    marker.measure_to &&
+    (marker.measure_from.x !== marker.measure_to.x || marker.measure_from.y !== marker.measure_to.y) &&
+    !(marker.measure_from.x === 0 && marker.measure_from.y === 0) &&
+    !(marker.measure_to.x === 0 && marker.measure_to.y === 0);
+  if (hasVisionPoints) {
+    return {
+      from: toPoint(marker.measure_from, {x: box.x1, y: box.cy}),
+      to: toPoint(marker.measure_to, {x: box.x2, y: box.cy}),
+    };
+  }
+  const axis = measureAxisForMarker(marker);
+  if (axis === 'vertical') return {from: {x: box.cx, y: box.y2}, to: {x: box.cx, y: box.y1}};
+  if (axis === 'diagonal') return {from: {x: box.x1, y: box.y2}, to: {x: box.x2, y: box.y1}};
+  return {from: {x: box.x1, y: box.cy}, to: {x: box.x2, y: box.cy}};
+};
+
 const markerTextPosition = (
   text: string,
   marker: NonNullable<ArchiveScene['marker']>,
@@ -774,12 +805,21 @@ const markerTextPosition = (
   });
 
   const visionLabel = labelBoxToPixels(marker.label_box);
-  if (visionLabel) {
+  const directedMeasure =
+    marker.type !== 'measure' ||
+    (marker.measure_axis && marker.measure_axis !== 'auto') ||
+    (marker.measure_from && marker.measure_to);
+  if (visionLabel && directedMeasure) {
     return clampLabel(visionLabel.cx - approxWidth / 2, visionLabel.cy - approxHeight / 2);
   }
 
   if (marker.type === 'measure') {
-    return clampLabel(box.cx - approxWidth / 2, box.cy - approxHeight - 24);
+    const measure = measurePointsForMarker(marker, box);
+    const midX = (measure.from.x + measure.to.x) / 2;
+    const midY = (measure.from.y + measure.to.y) / 2;
+    return measureAxisForMarker(marker) === 'vertical'
+      ? clampLabel(midX + 34, midY - approxHeight / 2)
+      : clampLabel(midX - approxWidth / 2, midY - approxHeight - 24);
   }
   if (marker.type === 'arrow' || marker.type === 'circle_arrow') {
     const arrowStart = toPoint(marker.arrow_from, {x: clamp(box.x1 - 120, 70, 1850), y: clamp(box.y1 - 76, 70, 1010)});
@@ -894,6 +934,7 @@ const MarkerOverlay = ({
   const box = toPixelBox(marker.box);
   const start = toPoint(marker.arrow_from, {x: clamp(box.x1 - 120, 70, 1850), y: clamp(box.y1 - 76, 70, 1010)});
   const end = toPoint(marker.arrow_to, {x: box.cx, y: box.cy});
+  const measure = measurePointsForMarker(marker, box);
   const stroke = 'rgba(187, 0, 0, 0.56)';
   const strokeStrong = 'rgba(192, 0, 0, 0.64)';
   const text = (marker.text ?? '').trim();
@@ -955,11 +996,15 @@ const MarkerOverlay = ({
       );
     }
     if (marker.type === 'measure') {
+      const dx = measure.to.x - measure.from.x;
+      const dy = measure.to.y - measure.from.y;
+      const length = Math.max(1, Math.hypot(dx, dy));
+      const tick = {x: (-dy / length) * 42, y: (dx / length) * 42};
       return (
         <g>
-          {roughLine({x: box.x1, y: box.cy}, {x: box.x2, y: box.cy}, 'measure-main', true, false)}
-          {draw > 0.82 ? roughLine({x: box.x1, y: box.cy - 42}, {x: box.x1, y: box.cy + 42}, 'measure-left', true, false, 1) : null}
-          {draw > 0.82 ? roughLine({x: box.x2, y: box.cy - 42}, {x: box.x2, y: box.cy + 42}, 'measure-right', true, false, 1) : null}
+          {roughLine(measure.from, measure.to, 'measure-main', true, false)}
+          {draw > 0.82 ? roughLine({x: measure.from.x - tick.x, y: measure.from.y - tick.y}, {x: measure.from.x + tick.x, y: measure.from.y + tick.y}, 'measure-from', true, false, 1) : null}
+          {draw > 0.82 ? roughLine({x: measure.to.x - tick.x, y: measure.to.y - tick.y}, {x: measure.to.x + tick.x, y: measure.to.y + tick.y}, 'measure-to', true, false, 1) : null}
         </g>
       );
     }

@@ -16,6 +16,9 @@ export type ArchiveMarker = {
   label_box?: {x: number; y: number; w: number; h: number};
   arrow_from?: {x: number; y: number};
   arrow_to?: {x: number; y: number};
+  measure_from?: {x: number; y: number};
+  measure_to?: {x: number; y: number};
+  measure_axis?: 'auto' | 'horizontal' | 'vertical' | 'diagonal';
   confidence?: number;
 };
 
