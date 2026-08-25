@@ -98,25 +98,27 @@ export const Root = () => {
   const [handle] = useState(() => delayRender('Loading render package data'));
 
   const load = useCallback(async () => {
-    try {
-      const [avatarData, newsData, archiveData, cartoonData] = await Promise.all([
-        readJsonOrFallback('avatar_plan.json', fallbackAvatar),
-        readJsonOrFallback('scenes.json', fallbackNews),
-        readJsonOrFallback('archive.json', fallbackArchive),
-        readJsonOrFallback('cartoon.json', fallbackCartoon),
-      ]);
-      setAvatar(avatarData);
-      setNews(newsData);
-      setArchive(archiveData);
-      setCartoon(cartoonData);
-    } finally {
-      continueRender(handle);
-    }
-  }, [handle]);
+    const [avatarData, newsData, archiveData, cartoonData] = await Promise.all([
+      readJsonOrFallback('avatar_plan.json', fallbackAvatar),
+      readJsonOrFallback('scenes.json', fallbackNews),
+      readJsonOrFallback('archive.json', fallbackArchive),
+      readJsonOrFallback('cartoon.json', fallbackCartoon),
+    ]);
+    setAvatar(avatarData);
+    setNews(newsData);
+    setArchive(archiveData);
+    setCartoon(cartoonData);
+  }, []);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (avatar !== null && news !== null && archive !== null && cartoon !== null) {
+      continueRender(handle);
+    }
+  }, [archive, avatar, cartoon, handle, news]);
 
   const avatarData = avatar ?? fallbackAvatar;
   const newsData = news ?? fallbackNews;
